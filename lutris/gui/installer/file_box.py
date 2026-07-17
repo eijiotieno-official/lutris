@@ -17,6 +17,12 @@ from lutris.util.strings import gtk_safe
 class InstallerFileBox(Gtk.Box):
     """Container for an installer file downloader / selector"""
 
+    __gsignals__ = {
+        "file-available": (GObject.SIGNAL_RUN_FIRST, None, ()),
+        "file-ready": (GObject.SIGNAL_RUN_FIRST, None, ()),
+        "file-unready": (GObject.SIGNAL_RUN_FIRST, None, ()),
+    }
+
     def __init__(self, installer_file):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.installer_file = installer_file
