@@ -49,27 +49,29 @@ class ProgressBox(Gtk.Box):
     ProgressFunction = Callable[[], "ProgressInfo"]
 
     def __init__(self, progress_function: ProgressFunction, **kwargs):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, no_show_all=True, spacing=6, **kwargs)
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, **kwargs)
+        self.set_visible(False)
 
         self.progress_function = progress_function
         self.progress = ProgressInfo(0.0)
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=True, spacing=6, valign=Gtk.Align.CENTER)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, valign=Gtk.Align.CENTER)
 
-        self.label = Gtk.Label(label="", visible=False, wrap=True, ellipsize=Pango.EllipsizeMode.MIDDLE, xalign=0)
-        vbox.pack_start(self.label, False, False, 0)
+        self.label = Gtk.Label(label="", wrap=True, ellipsize=Pango.EllipsizeMode.MIDDLE, xalign=0)
+        self.label.set_visible(False)
+        vbox.append(self.label)
 
-        self.progressbar = Gtk.ProgressBar(pulse_step=0.4, visible=True)
+        self.progressbar = Gtk.ProgressBar(pulse_step=0.4)
         self.progressbar.set_valign(Gtk.Align.CENTER)
-        vbox.pack_start(self.progressbar, False, False, 0)
+        vbox.append(self.progressbar)
 
-        self.pack_start(vbox, True, True, 0)
+        self.append(vbox)
 
-        self.stop_button = Gtk.Button.new_from_icon_name("media-playback-stop-symbolic", Gtk.IconSize.BUTTON)
-        self.stop_button.hide()
-        self.stop_button.get_style_context().add_class("circular")
+        self.stop_button = Gtk.Button(icon_name="media-playback-stop-symbolic")
+        self.stop_button.add_css_class("circular")
+        self.stop_button.set_visible(False)
         self.stop_button.connect("clicked", self.on_stop_clicked)
-        self.pack_start(self.stop_button, False, False, 0)
+        self.append(self.stop_button)
 
         self._destroyed = False
         self._apply_progress(ProgressInfo(0.0, "Please wait..."))
@@ -100,7 +102,6 @@ class ProgressBox(Gtk.Box):
         self._apply_progress(progress)
 
     def _apply_progress(self, progress: ProgressInfo):
-        # Just in case the progress-function destroys the progress box.
         if self._destroyed:
             return
 
@@ -119,6 +120,6 @@ class ProgressBox(Gtk.Box):
             if markup != self.label.get_text():
                 self.label.set_markup(markup)
                 self.label.set_tooltip_markup(markup)
-            self.label.show()
+            self.label.set_visible(True)
         else:
-            self.label.hide()
+            self.label.set_visible(False)

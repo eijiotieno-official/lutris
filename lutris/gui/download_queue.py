@@ -6,7 +6,6 @@ from typing import Any
 from gi.repository import Gtk  # type: ignore
 
 from lutris.gui.widgets import NotificationSource
-from lutris.gui.widgets.gi_composites import GtkTemplate
 from lutris.gui.widgets.progress_box import ProgressBox
 from lutris.util import datapath
 from lutris.util.jobs import AsyncCall
@@ -15,14 +14,14 @@ from lutris.util.log import logger
 DOWNLOAD_QUEUE_COMPLETED = NotificationSource()
 
 
-@GtkTemplate(ui=os.path.join(datapath.get(), "ui", "download-queue.ui"))
+@Gtk.Template(filename=os.path.join(datapath.get(), "ui", "download-queue.ui"))
 class DownloadQueue(Gtk.ScrolledWindow):
     """This class is a widget that displays a stack of progress boxes, which you can create
     and destroy with its methods."""
 
     __gtype_name__ = "DownloadQueue"
 
-    download_box: Gtk.Box = GtkTemplate.Child()  # type: ignore
+    download_box: Gtk.Box = Gtk.Template.Child()  # type: ignore
 
     CompletionFunction = Callable[[Any], None]
     ErrorFunction = Callable[[Exception], None]
@@ -30,18 +29,9 @@ class DownloadQueue(Gtk.ScrolledWindow):
     def __init__(self, revealer: Gtk.Revealer, **kwargs):
         super().__init__(**kwargs)
         self.revealer = revealer
-        self.init_template()
 
         self.running_operation_names: set[str] = set()
         self.progress_boxes: dict[ProgressBox.ProgressFunction, ProgressBox] = {}
-
-        try:
-            # GTK 3.22 is required for this, but if this fails we can still run.
-            # The download area comes out too small, but it's usable.
-            self.set_max_content_height(250)
-            self.set_propagate_natural_height(True)
-        except AttributeError:
-            pass
 
     @property
     def is_empty(self):
@@ -77,8 +67,8 @@ class DownloadQueue(Gtk.ScrolledWindow):
         progress_box.update_progress()
 
         self.progress_boxes[progress_function] = progress_box
-        self.download_box.pack_start(progress_box, False, False, 0)
-        progress_box.show()
+        self.download_box.append(progress_box)
+        progress_box.set_visible(True)
         self.revealer.set_reveal_child(True)
         return progress_box
 
@@ -88,7 +78,7 @@ class DownloadQueue(Gtk.ScrolledWindow):
         progress_box = self.progress_boxes.get(progress_function)
         if progress_box:
             del self.progress_boxes[progress_function]
-            progress_box.destroy()
+            progress_box.unparent()
             if not self.progress_boxes:
                 self.revealer.set_reveal_child(False)
 

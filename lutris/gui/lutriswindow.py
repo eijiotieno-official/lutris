@@ -11,7 +11,7 @@ from gettext import ngettext
 from typing import cast
 from urllib.parse import unquote, urlparse
 
-from gi.repository import Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from lutris import services, settings
 from lutris.api import (
@@ -58,7 +58,6 @@ from lutris.gui.views.grid import GameGridView
 from lutris.gui.views.list import GameListView
 from lutris.gui.views.store import GameStore
 from lutris.gui.widgets.game_bar import GameBar
-from lutris.gui.widgets.gi_composites import GtkTemplate
 from lutris.gui.widgets.progress_box import ProgressBox, ProgressInfo
 from lutris.gui.widgets.sidebar import LutrisSidebar, SidebarRow
 from lutris.gui.widgets.stock_icon_image import StockIconImage
@@ -81,8 +80,8 @@ from lutris.util.system import update_desktop_icons
 from lutris.util.wine.wine import clear_wine_version_cache
 
 
-@GtkTemplate(ui=os.path.join(datapath.get(), "ui", "lutris-window.ui"))
-class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallUIDelegate):  # type:ignore[misc]
+@Gtk.Template(filename=os.path.join(datapath.get(), "ui", "lutris-window.ui"))
+class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallUIDelegate):  # type:ignore[misc]
     """Handler class for main window signals."""
 
     default_view_type = "grid"
@@ -90,41 +89,37 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
     default_height = 600
 
     __gtype_name__ = "LutrisWindow"
-    games_stack: Gtk.Stack = GtkTemplate.Child()
-    sidebar_revealer: Gtk.Revealer = GtkTemplate.Child()
-    sidebar_scrolled: Gtk.ScrolledWindow = GtkTemplate.Child()
-    game_revealer: Gtk.Revealer = GtkTemplate.Child()
-    search_entry: Gtk.SearchEntry = GtkTemplate.Child()
-    search_filters_button: Gtk.MenuButton = GtkTemplate.Child()
-    search_box: Gtk.Box = GtkTemplate.Child()
-    zoom_adjustment: Gtk.Adjustment = GtkTemplate.Child()
-    blank_overlay: Gtk.Alignment = GtkTemplate.Child()
-    viewtype_icon: Gtk.Image = GtkTemplate.Child()
-    download_revealer: Gtk.Revealer = GtkTemplate.Child()
-    game_view_spinner: Gtk.Spinner = GtkTemplate.Child()
-    login_notification_revealer: Gtk.Revealer = GtkTemplate.Child()
-    lutris_log_in_label: Gtk.Label = GtkTemplate.Child()
-    version_notification_revealer: Gtk.Revealer = GtkTemplate.Child()
-    version_notification_label: Gtk.Label = GtkTemplate.Child()
-    show_hidden_games_button: Gtk.ModelButton = GtkTemplate.Child()
+    games_stack: Gtk.Stack = Gtk.Template.Child()
+    split_view: Adw.OverlaySplitView = Gtk.Template.Child()
+    sidebar_scrolled: Gtk.ScrolledWindow = Gtk.Template.Child()
+    game_revealer: Gtk.Revealer = Gtk.Template.Child()
+    search_entry: Gtk.SearchEntry = Gtk.Template.Child()
+    search_bar: Gtk.SearchBar = Gtk.Template.Child()
+    search_filters_button: Gtk.ToggleButton = Gtk.Template.Child()
+    search_box: Gtk.Box = Gtk.Template.Child()
+    zoom_adjustment: Gtk.Adjustment = Gtk.Template.Child()
+    blank_overlay: Gtk.Box = Gtk.Template.Child()
+    viewtype_icon: Gtk.Image = Gtk.Template.Child()
+    download_revealer: Gtk.Revealer = Gtk.Template.Child()
+    game_view_spinner: Gtk.Spinner = Gtk.Template.Child()
+    login_banner: Adw.Banner = Gtk.Template.Child()
+    login_notification_box: Gtk.Box = Gtk.Template.Child()
+    version_banner: Adw.Banner = Gtk.Template.Child()
+    version_notification_box: Gtk.Box = Gtk.Template.Child()
+    show_hidden_games_button: Gtk.Button = Gtk.Template.Child()
 
     def __init__(self, application=None, **kwargs) -> None:
         width = int(settings.read_setting("width") or self.default_width)
         height = int(settings.read_setting("height") or self.default_height)
         super().__init__(
-            default_width=width,
-            default_height=height,
-            window_position=Gtk.WindowPosition.NONE,
-            name="lutris",
-            icon_name="net.lutris.Lutris",
             application=application,
             **kwargs,
         )
+        self.set_default_size(width, height)
         update_desktop_icons()
         load_icon_theme()
-        self.set_wmclass("net.lutris.Lutris", "net.lutris.Lutris")
         self.application = application
-        self.window_x, self.window_y = self.get_position()
+        self.window_x, self.window_y = None, None
         self.restore_window_position()
         self.threads_stoppers = []
         self.window_size = (width, height)
@@ -148,18 +143,15 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         }
         self.sortable_dynamic_categories = {".uncategorized", "missing", "running"}
 
-        self.accelerators = Gtk.AccelGroup()
-        self.add_accel_group(self.accelerators)
-
-        self.connect("delete-event", self.on_window_delete)
-        self.connect("configure-event", self.on_window_configure)
+        self.connect("close-request", self.on_window_close_request)
         self.connect("realize", self.on_load)
-        self.connect("drag-data-received", self.on_drag_data_received)
         self.connect("notify::visible", self.on_visible_changed)
+        self.connect("notify::width", self.on_resize)
+        self.connect("notify::height", self.on_resize)
         if self.maximized:
             self.maximize()
-        self.init_template()
         self._init_actions()
+        self._setup_controllers()
 
         # Per-game progress functions for launch-status (e.g. umu runtime
         # downloads). Keyed by game id so we can retrieve the same function
@@ -172,36 +164,32 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         filter_button_image = StockIconImage(
             ["filter-symbolic", "edit-find-replace-symbolic"],
             fallback_name="system-search-symbolic",
-            icon_size=Gtk.IconSize.BUTTON,
+            pixel_size=16,
         )
-        filter_button_image.show()
-        self.search_filters_button.set_image(filter_button_image)
+        self.search_filters_button.set_child(filter_button_image)
         self.filter_box_search_name = ""
 
-        # Setup Drag and drop
-        self.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.COPY)
-        self.drag_dest_add_uri_targets()
-
         self.set_viewtype_icon(self.current_view_type)
-
-        lutris_icon = Gtk.Image.new_from_icon_name("net.lutris.Lutris", Gtk.IconSize.MENU)
-        lutris_icon.set_margin_right(3)
 
         self.sidebar = LutrisSidebar(self.application)
         self.sidebar.connect("selected-rows-changed", self.on_sidebar_changed)
         # "realize" is order sensitive- must connect after sidebar itself connects the same signal
         self.sidebar.connect("realize", self.on_sidebar_realize)
-        self.sidebar_scrolled.add(self.sidebar)
+        self.sidebar_scrolled.set_child(self.sidebar)
 
         # This must wait until the selected-rows-changed signal is connected
         self.sidebar.initialize_rows()
 
-        self.sidebar_revealer.set_reveal_child(self.side_panel_visible)
-        self.sidebar_revealer.set_transition_duration(300)
+        self.split_view.set_show_sidebar(self.side_panel_visible)
+
+        self.login_notification_box.set_visible(False)
+        self.version_notification_box.set_visible(False)
+        self.login_banner.set_revealed(False)
+        self.version_banner.set_revealed(False)
 
         self.game_bar = None
-        self.revealer_box = Gtk.HBox(visible=True)
-        self.game_revealer.add(self.revealer_box)
+        self.revealer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, visible=True)
+        self.game_revealer.set_child(self.revealer_box)
 
         self.update_action_state()
         self.update_notification()
@@ -232,11 +220,77 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         schedule_at_idle(self.sync_library, delay_seconds=1.0)
 
     def on_busy_started(self):
-        display = Gdk.Display.get_default()
-        self.get_window().set_cursor(Gdk.Cursor.new_from_name(display, "progress"))
+        self.set_cursor(Gdk.Cursor.new_from_name("progress", None))
 
     def on_busy_stopped(self):
-        self.get_window().set_cursor(None)
+        self.set_cursor(None)
+
+    def _setup_controllers(self):
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.add_controller(key_controller)
+
+        drop_target = Gtk.DropTarget.new(GObject.TYPE_INVALID, Gdk.DragAction.COPY)
+        drop_target.set_gtypes([Gdk.FileList.__gtype__, Gio.File.__gtype__])
+        drop_target.connect("drop", self.on_drop)
+        self.add_controller(drop_target)
+
+    @staticmethod
+    def _clear_box_children(box: Gtk.Box) -> None:
+        child = box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            box.remove(child)
+            child = next_child
+
+    @staticmethod
+    def _box_has_children(box: Gtk.Box) -> bool:
+        return box.get_first_child() is not None
+
+    def _paths_from_drop_value(self, value) -> list[str]:
+        file_paths = []
+        if isinstance(value, Gdk.FileList):
+            files = value.get_files()
+        elif isinstance(value, Gio.File):
+            files = [value]
+        else:
+            return file_paths
+
+        for file_obj in files:
+            path = file_obj.get_path()
+            if path:
+                file_paths.append(path)
+            else:
+                file_paths.append(unquote(urlparse(file_obj.get_uri()).path))
+        return file_paths
+
+    def on_drop(self, _target, value, _x, _y):
+        file_paths = self._paths_from_drop_value(value)
+        if file_paths:
+            dialog = ImportGameDialog(file_paths, parent=self)
+            dialog.present()
+        return True
+
+    def on_key_pressed(self, _controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape:
+            self.search_entry.set_text("")
+            self.current_view.grab_focus()
+            return False
+
+        if (
+            not Gdk.KEY_0 <= keyval <= Gdk.KEY_z
+            or state & Gdk.ModifierType.CONTROL_MASK
+            or state & Gdk.ModifierType.SHIFT_MASK
+            or state & Gdk.ModifierType.META_MASK
+            or state & Gdk.ModifierType.MOD1_MASK
+            or self.search_entry.has_focus()
+        ):
+            return False
+        self.search_entry.grab_focus()
+        unicode_char = Gdk.keyval_to_unicode(keyval)
+        if unicode_char:
+            self.search_entry.insert_text(chr(unicode_char), -1)
+        return True
 
     def _init_actions(self):
         Action = namedtuple("Action", ("callback", "type", "enabled", "default", "accel"))
@@ -321,7 +375,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
                 self.action_state_updaters.append(updater)
             self.add_action(action)
             if value.accel:
-                app.add_accelerator(value.accel, "win." + name)
+                app.set_accels_for_action("win." + name, [value.accel])
 
     def sync_library(self, force: bool = False) -> None:
         """Tasks that can be run after the UI has been initialized."""
@@ -358,10 +412,10 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         self.current_view.grab_focus()
 
     def on_drag_data_received(self, _widget, _drag_context, _x, _y, data, _info, _time):
-        """Handler for drop event"""
+        """Handler for drop event (legacy GTK3 signature kept for compatibility)."""
         file_paths = [unquote(urlparse(uri).path) for uri in data.get_uris()]
         dialog = ImportGameDialog(file_paths, parent=self)
-        dialog.show()
+        dialog.present()
 
     def load_filters(self):
         """Load the initial filters when creating the view"""
@@ -383,7 +437,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             if self.sidebar.previous_category:
                 self.sidebar.selected_category = self.sidebar.previous_category
         else:
-            self.sidebar.hidden_row.show()
+            self.sidebar.hidden_row.set_visible(True)
             self.sidebar.selected_category = hidden_category
 
     def on_open_search_filters(self, _action, _value):
@@ -407,8 +461,9 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             if self.filter_box_search_name:
                 filter_box.search_name = self.filter_box_search_name
             filter_box.connect("saved", on_saved)
-            filter_box.show()
-            filter_popover = Gtk.Popover(child=filter_box, can_focus=False, relative_to=self.search_filters_button)
+            filter_popover = Gtk.Popover()
+            filter_popover.set_child(filter_box)
+            filter_popover.set_parent(self.search_filters_button)
             filter_popover.connect("closed", on_filter_popover_closed)
             filter_popover.popup()
 
@@ -589,14 +644,14 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
     def update_missing_games_sidebar_row(self) -> None:
         missing_games = self.get_missing_games()
         if missing_games:
-            self.sidebar.missing_row.show()
+            self.sidebar.missing_row.set_visible(True)
             if self.selected_category == ("dynamic_category", "missing"):
                 self.update_store()
         else:
             missing_ids = MISSING_GAMES.missing_game_ids
             if missing_ids:
                 logger.warning("Path cache out of date? (%s IDs missing)", len(missing_ids))
-            self.sidebar.missing_row.hide()
+            self.sidebar.missing_row.set_visible(False)
 
     def get_recent_games(self):
         """Return a list of recently played games"""
@@ -757,7 +812,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
                 self.game_bar.destroy()
             if len(games) == 1 and games[0]:
                 self.game_bar = GameBar(games[0], self.application, self)
-                self.revealer_box.pack_start(self.game_bar, True, True, 0)
+                self.revealer_box.append(self.game_bar)
             else:
                 self.game_bar = None
         elif self.game_bar:
@@ -766,7 +821,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             # when the game gets unselected, which is somewhat closer to what the intended behavior
             # should be anyway. Might require closing the game bar manually in some cases.
             pass
-        if self.revealer_box.get_children():
+        if self._box_has_children(self.revealer_box):
             self.game_revealer.set_reveal_child(True)
         else:
             self.game_revealer.set_reveal_child(False)
@@ -924,23 +979,29 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         theme = "dark" if self.application.style_manager.is_dark else "light"
         side_splash = Gtk.Image(visible=True)
         side_splash.set_from_file(os.path.join(datapath.get(), "media/side-%s.svg" % theme))
-        side_splash.set_alignment(0, 0)
+        side_splash.set_halign(Gtk.Align.START)
+        side_splash.set_valign(Gtk.Align.START)
 
         center_splash = Gtk.Image(visible=True)
-        center_splash.set_alignment(0.5, 0.5)
+        center_splash.set_halign(Gtk.Align.CENTER)
+        center_splash.set_valign(Gtk.Align.CENTER)
         center_splash.set_from_file(os.path.join(datapath.get(), "media/splash-%s.svg" % theme))
 
-        splash_box = Gtk.HBox(visible=True, margin_top=24)
-        splash_box.pack_start(side_splash, False, False, 12)
-        splash_box.set_center_widget(center_splash)
+        splash_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, margin_top=24, visible=True)
+        splash_box.append(side_splash)
+        center_box = Gtk.Box(hexpand=True, vexpand=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        center_box.append(center_splash)
+        splash_box.append(center_box)
         splash_box.is_splash = True
         self.show_overlay(splash_box, Gtk.Align.FILL, Gtk.Align.FILL)
 
     def is_showing_splash(self):
         if self.blank_overlay.get_visible():
-            for ch in self.blank_overlay.get_children():
-                if hasattr(ch, "is_splash"):
+            child = self.blank_overlay.get_first_child()
+            while child:
+                if hasattr(child, "is_splash"):
                     return True
+                child = child.get_next_sibling()
         return False
 
     def on_theme_changed(self):
@@ -953,27 +1014,25 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         # blank_overlay has never yet been visible.
         # It works better if created up front and shown like this.
         self.game_view_spinner.start()
-        self.game_view_spinner.show()
-        self.games_stack.hide()
-        self.blank_overlay.hide()
+        self.game_view_spinner.set_visible(True)
+        self.games_stack.set_visible(False)
+        self.blank_overlay.set_visible(False)
 
     def show_overlay(self, widget, halign=Gtk.Align.FILL, valign=Gtk.Align.FILL):
         """Display a widget in the blank overlay"""
-        for child in self.blank_overlay.get_children():
-            child.destroy()
+        self._clear_box_children(self.blank_overlay)
         self.blank_overlay.set_halign(halign)
         self.blank_overlay.set_valign(valign)
-        self.blank_overlay.add(widget)
-        self.blank_overlay.show()
-        self.games_stack.hide()
-        self.game_view_spinner.hide()
+        self.blank_overlay.append(widget)
+        self.blank_overlay.set_visible(True)
+        self.games_stack.set_visible(False)
+        self.game_view_spinner.set_visible(False)
 
     def hide_overlay(self):
-        self.blank_overlay.hide()
-        self.game_view_spinner.hide()
-        self.games_stack.show()
-        for child in self.blank_overlay.get_children():
-            child.destroy()
+        self.blank_overlay.set_visible(False)
+        self.game_view_spinner.set_visible(False)
+        self.games_stack.set_visible(True)
+        self._clear_box_children(self.blank_overlay)
 
     @property
     def view_type(self):
@@ -984,28 +1043,8 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         return self.default_view_type
 
     def do_key_press_event(self, event):  # pylint: disable=arguments-differ
-        # XXX: This block of code below is to enable searching on type.
-        # Enabling this feature steals focus from other entries so it needs
-        # some kind of focus detection before enabling library search.
-
-        # Probably not ideal for non-english, but we want to limit
-        # which keys actually start searching
-        if event.keyval == Gdk.KEY_Escape:
-            self.search_entry.set_text("")
-            self.current_view.grab_focus()
-            return Gtk.ApplicationWindow.do_key_press_event(self, event)
-
-        if (  # pylint: disable=too-many-boolean-expressions
-            not Gdk.KEY_0 <= event.keyval <= Gdk.KEY_z
-            or event.state & Gdk.ModifierType.CONTROL_MASK
-            or event.state & Gdk.ModifierType.SHIFT_MASK
-            or event.state & Gdk.ModifierType.META_MASK
-            or event.state & Gdk.ModifierType.MOD1_MASK
-            or self.search_entry.has_focus()
-        ):
-            return Gtk.ApplicationWindow.do_key_press_event(self, event)
-        self.search_entry.grab_focus()
-        return self.search_entry.do_key_press_event(self.search_entry, event)
+        # Replaced by EventControllerKey in _setup_controllers.
+        return False
 
     def load_icon_type(self):
         """Return the icon style depending on the type of view."""
@@ -1057,8 +1096,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             self.games_stack.add_named(scrolledwindow, view_type)
 
         if not scrolledwindow.get_child():
-            scrolledwindow.add(self.current_view)
-            scrolledwindow.show_all()
+            scrolledwindow.set_child(self.current_view)
 
         self.update_view_settings()
         self.games_stack.set_visible_child_name(view_type)
@@ -1072,7 +1110,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         if view_type in self.views:
             view = self.views[view_type]
             scrolledwindow = self.games_stack.get_child_by_name(view_type)
-            scrolledwindow.remove(view)
+            scrolledwindow.set_child(None)
             del self.views[view_type]
             if self.current_view_type == view_type:
                 self.redraw_view()
@@ -1086,7 +1124,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             self.current_view.show_badges = show_badges and not bool(self.filters.get("platform"))
 
     def set_viewtype_icon(self, view_type):
-        self.viewtype_icon.set_from_icon_name("view-%s-symbolic" % view_type, Gtk.IconSize.BUTTON)
+        self.viewtype_icon.set_from_icon_name("view-%s-symbolic" % view_type)
 
     def set_show_installed_state(self, filter_installed):
         """Shows or hide uninstalled games"""
@@ -1099,22 +1137,22 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             and not read_api_key()
             and not settings.read_bool_setting("dismissed_login_notification")
         )
-        if show_notification:
-            self.lutris_log_in_label.show()
-        self.login_notification_revealer.set_reveal_child(show_notification)
+        self.login_notification_box.set_visible(show_notification)
+        self.login_banner.set_revealed(show_notification)
 
-    @GtkTemplate.Callback
-    def on_lutris_log_in_label_activate_link(self, _label, _url):
+    @Gtk.Template.Callback
+    def on_login_banner_button_clicked(self, _banner):
         def on_connect_success(widget, _username):
             self.sync_library(force=True)
 
-        self.login_notification_revealer.set_reveal_child(False)
+        self.login_banner.set_revealed(False)
         login_dialog = ClientLoginDialog(parent=self)
         login_dialog.connect("connected", on_connect_success)
 
     def on_login_notification_close_button_clicked(self, _button):
         settings.write_setting("dismissed_login_notification", True)
-        self.login_notification_revealer.set_reveal_child(False)
+        self.login_banner.set_revealed(False)
+        self.login_notification_box.set_visible(False)
 
     def on_version_notification_close_button_clicked(self, _button):
         dialog = QuestionDialog(
@@ -1129,7 +1167,8 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         )
 
         if dialog.result == Gtk.ResponseType.YES:
-            self.version_notification_revealer.set_reveal_child(False)
+            self.version_banner.set_revealed(False)
+            self.version_notification_box.set_visible(False)
             runtime_versions = get_runtime_versions()
             if runtime_versions:
                 client_version = runtime_versions.get("client_version")
@@ -1157,8 +1196,6 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         the window, but restore the other settings only when creating it."""
         self.window_x = settings.read_setting("window_x")
         self.window_y = settings.read_setting("window_y")
-        if self.window_x and self.window_y:
-            self.move(int(self.window_x), int(self.window_y))
 
     def on_service_login(self, service):
         self.update_notification()
@@ -1185,55 +1222,54 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
     def on_local_library_updated(self):
         self.redraw_view()
 
-    @GtkTemplate.Callback
     def on_resize(self, widget, *_args):
-        """Size-allocate signal.
+        """Notify handler for width/height changes.
         Updates stored window size and maximized state.
         """
-        if not widget.get_window():
-            return
         self.maximized = widget.is_maximized()
-        size = widget.get_size()
         if not self.maximized:
-            self.window_size = size
-        self.search_entry.set_size_request(min(max(50, size[0] - 470), 800), -1)
+            self.window_size = (widget.get_width(), widget.get_height())
+        self.search_entry.set_size_request(min(max(50, widget.get_width() - 470), 800), -1)
 
-    def on_window_delete(self, *_args):
+    def on_window_close_request(self, *_args):
         app = self.application
         if app.has_running_games:
-            self.hide()
+            self.set_visible(False)
             return True
         if not self.is_download_queue_empty:
-            self.hide()
+            self.set_visible(False)
             return True
         if app.has_tray_icon():
-            self.hide()
+            self.set_visible(False)
             return True
+        return False
+
+    def on_window_delete(self, *_args):
+        return self.on_window_close_request()
 
     def on_visible_changed(self, window, param):
         if self.application.tray:
             self.application.tray.update_present_menu()
 
     def on_window_configure(self, *_args):
-        """Callback triggered when the window is moved, resized..."""
-        self.window_x, self.window_y = self.get_position()
+        """GTK3 compatibility stub; window position is not tracked on GTK4."""
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_destroy(self, *_args):
         """Signal for window close."""
         # Stop cancellable running threads
         for stopper in self.threads_stoppers:
             stopper()
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_hide(self, *_args):
         self.save_window_state()
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_show(self, *_args):
         self.restore_window_position()
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_preferences_activate(self, *_args):
         """Callback when preferences is activated."""
         self.application.show_window(PreferencesDialog, parent=self)
@@ -1244,25 +1280,24 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         self.set_show_installed_state(value.get_boolean())
         self.update_store()
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_search_entry_changed(self, entry):
         """Callback for the search input keypresses"""
         self.search_timer_task.unschedule()
         self.filters["text"] = entry.get_text().strip()
         self.search_timer_task = schedule_at_idle(self.update_store, delay_seconds=0.5)
 
-    @GtkTemplate.Callback
-    def on_search_entry_key_press(self, widget, event):
-        if event.keyval == Gdk.KEY_Down:
+    def on_search_entry_key_press(self, _controller, keyval, _keycode, _state):
+        if keyval == Gdk.KEY_Down:
+            first_path = Gtk.TreePath((0,))
             if self.current_view_type == "grid":
-                self.current_view.select_path(Gtk.TreePath("0"))  # needed for gridview only
-                # if game_bar is alive at this point it can mess grid item selection up
-                # for some unknown reason,
-                # it is safe to close it here, it will be reopened automatically.
+                self.current_view.select_path(first_path)
                 if self.game_bar:
-                    self.game_bar.destroy()  # for gridview only
-            self.current_view.set_cursor(Gtk.TreePath("0"), None, False)  # needed for both view types
+                    self.game_bar.destroy()
+            self.current_view.set_cursor(first_path, None, False)
             self.current_view.grab_focus()
+            return True
+        return False
 
     def on_kill_wine(self, *_args):
         """Callback to kill all Wine processes after confirmation."""
@@ -1282,7 +1317,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
 
             kill_all_wine_processes()
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_about_clicked(self, *_args):
         """Open the about dialog."""
         dialogs.AboutDialog(parent=self)
@@ -1293,7 +1328,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         error_handler = get_error_handler(type(error))
         error_handler(error, self)
 
-    @GtkTemplate.Callback
+    @Gtk.Template.Callback
     def on_add_game_button_clicked(self, *_args):
         """Add a new game manually with the AddGameDialog."""
         self.application.show_window(AddGamesWindow, parent=self)
@@ -1332,7 +1367,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         action.set_state(value)
         side_panel_visible = value.get_boolean()
         settings.write_setting("side_panel_visible", bool(side_panel_visible))
-        self.sidebar_revealer.set_reveal_child(side_panel_visible)
+        self.split_view.set_show_sidebar(side_panel_visible)
 
     def on_sidebar_changed(self, widget):
         """Handler called when the selected element of the sidebar changes"""
@@ -1351,13 +1386,12 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         self.redraw_view()
 
         if row_type != "category" or row_id != ".hidden":
-            self.sidebar.hidden_row.hide()
+            self.sidebar.hidden_row.set_visible(False)
             self.show_hidden_games_button.set_label(_("Show Hidden Games"))
         else:
             self.show_hidden_games_button.set_label(_("Rehide Hidden Games"))
-        # We just _replaced_ the label, need to align it. That is weird and
-        # contrary to the docs, but here we are.
-        self.show_hidden_games_button.get_child().set_halign(Gtk.Align.START)
+        # We just _replaced_ the label, need to align it.
+        self.show_hidden_games_button.set_halign(Gtk.Align.START)
 
         if not MISSING_GAMES.is_initialized or (row_type == "dynamic_category" and row_id == "missing"):
             MISSING_GAMES.update_all_missing()
@@ -1516,7 +1550,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         queue = cast(DownloadQueue, self.download_revealer.get_child())
         if not queue:
             queue = DownloadQueue(self.download_revealer)
-            self.download_revealer.add(queue)
+            self.download_revealer.set_child(queue)
         return queue
 
     def start_runtime_updates(self, force_updates: bool) -> None:
@@ -1547,8 +1581,9 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
                         + '<a href="https://lutris.net/downloads/">Download %s here!</a>'
                     )
                     markup = markup % (settings.VERSION, supported_client_version)
-                    self.version_notification_label.set_label(markup)
-                    self.version_notification_revealer.set_reveal_child(True)
+                    self.version_banner.set_title(markup)
+                    self.version_banner.set_revealed(True)
+                    self.version_notification_box.set_visible(True)
 
                 if component_updaters:
                     self.install_runtime_component_updates(component_updaters, runtime_updater)

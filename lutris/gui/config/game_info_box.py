@@ -62,7 +62,7 @@ class GameInfoBox(AdvancedSettingsBox):
         self._game_config_location_entry = None
 
         if self.game:
-            centering_container = Gtk.HBox()
+            centering_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
             banner_box = self._get_banner_box()
             centering_container.pack_start(banner_box, True, False, 0)
             self.pack_start(centering_container, False, False, 0)  # Banner
@@ -93,18 +93,14 @@ class GameInfoBox(AdvancedSettingsBox):
     def update_widgets(self):
         if self.game:
             self._cover_entry.set_visible(self._advanced_visibility)
-            self._cover_entry.set_no_show_all(not self._advanced_visibility)
             self._banner_entry.set_visible(self._advanced_visibility)
-            self._banner_entry.set_no_show_all(not self._advanced_visibility)
             self._icon_entry.set_visible(self._advanced_visibility)
-            self._icon_entry.set_no_show_all(not self._advanced_visibility)
 
         if self._game_config_location_entry:
             self._game_config_location_entry.set_visible(self._advanced_visibility)
-            self._game_config_location_entry.set_no_show_all(not self._advanced_visibility)
 
     def _get_name_box(self):
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12)
         label = Label(_("Name"))
         box.pack_start(label, False, False, 0)
         self.name_entry = Gtk.Entry()
@@ -115,7 +111,7 @@ class GameInfoBox(AdvancedSettingsBox):
         return box
 
     def _get_sortname_box(self):
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12)
         label = Label(_("Sort name"))
         box.pack_start(label, False, False, 0)
         self.sortname_entry = Gtk.Entry()
@@ -128,7 +124,7 @@ class GameInfoBox(AdvancedSettingsBox):
         return box
 
     def _get_year_box(self):
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12)
 
         label = Label(_("Release year"))
         box.pack_start(label, False, False, 0)
@@ -141,7 +137,7 @@ class GameInfoBox(AdvancedSettingsBox):
         return box
 
     def _get_playtime_box(self):
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12)
 
         label = Label(_("Playtime"))
         box.pack_start(label, False, False, 0)
@@ -154,9 +150,9 @@ class GameInfoBox(AdvancedSettingsBox):
         return box
 
     def _get_slug_box(self):
-        slug_box = Gtk.VBox(spacing=12, margin_right=12, margin_left=12)
+        slug_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin_end=12, margin_start=12)
 
-        slug_entry_box = Gtk.Box(spacing=12, margin_right=0, margin_left=0)
+        slug_entry_box = Gtk.Box(spacing=12, margin_end=0, margin_start=0)
         slug_label = Label()
         slug_label.set_markup(
             _(f"""Identifier\n<span size='x-small'>(Internal ID: {self.game.id if self.game else '""'})</span>""")
@@ -180,7 +176,7 @@ class GameInfoBox(AdvancedSettingsBox):
 
     def _get_directory_box(self):
         """Return widget displaying the location of the game and allowing to move it"""
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12, visible=True)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12, visible=True)
         label = Label(_("Directory"))
         box.pack_start(label, False, False, 0)
         self.directory_entry = Gtk.Entry(visible=True)
@@ -194,7 +190,7 @@ class GameInfoBox(AdvancedSettingsBox):
         return box
 
     def _get_launch_config_box(self):
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12, visible=True)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12, visible=True)
 
         if self.game and self.game.config:
             game_config = self.game.config.game_level.get("game", {})
@@ -226,7 +222,7 @@ class GameInfoBox(AdvancedSettingsBox):
         return box
 
     def _get_game_config_location_box(self):
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12, visible=True)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12, visible=True)
 
         game_config_path = ""
         if self.game and self.game.config and isinstance(self.game.config.game_config_path, str):
@@ -242,7 +238,7 @@ class GameInfoBox(AdvancedSettingsBox):
         path_entry.set_sensitive(False)
         box.pack_start(path_entry, True, True, 0)
 
-        open_dir_button = Gtk.Button.new_from_icon_name("folder-symbolic", Gtk.IconSize.BUTTON)
+        open_dir_button = Gtk.Button.new_from_icon_name("folder-symbolic")
         open_dir_button.show()
         open_dir_button.set_tooltip_text(_("Open in file browser"))
         open_dir_button.get_style_context().add_class("circular")
@@ -267,7 +263,7 @@ class GameInfoBox(AdvancedSettingsBox):
         launch_config_box.hide()
 
     def _get_runner_box(self):
-        runner_box = Gtk.Box(spacing=12, margin_right=12, margin_left=12)
+        runner_box = Gtk.Box(spacing=12, margin_end=12, margin_start=12)
 
         runner_label = Label(_("Runner"))
         runner_box.pack_start(runner_label, False, False, 0)
@@ -311,7 +307,7 @@ class GameInfoBox(AdvancedSettingsBox):
 
     def _create_image_entry(self, image_type, image_label, image_entry_tooltip):
         """Return widget displaying the location of the coverart, banner or icon image"""
-        box = Gtk.Box(spacing=12, margin_right=12, margin_left=12, visible=True)
+        box = Gtk.Box(spacing=12, margin_end=12, margin_start=12, visible=True)
         label = Label(image_label)
         box.pack_start(label, False, False, 0)
 
@@ -322,7 +318,7 @@ class GameInfoBox(AdvancedSettingsBox):
 
         box.pack_start(path_entry, True, True, 0)
 
-        open_button = Gtk.Button.new_from_icon_name("folder-symbolic", Gtk.IconSize.BUTTON)
+        open_button = Gtk.Button.new_from_icon_name("folder-symbolic")
         open_button.show()
         open_button.set_tooltip_text(_("Open in file browser"))
         open_button.get_style_context().add_class("circular")
@@ -342,8 +338,8 @@ class GameInfoBox(AdvancedSettingsBox):
         """This adds an image button and its reset button to the box given,
         and adds the image button to self.image_buttons for future reference."""
 
-        image_button_container = Gtk.VBox()
-        button_container = Gtk.HBox()
+        image_button_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        button_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
 
         image_button = Gtk.Button()
         self._set_image(image_type, image_button)
@@ -352,21 +348,21 @@ class GameInfoBox(AdvancedSettingsBox):
         image_button.connect("clicked", self.on_custom_image_select, image_type)
         image_button_container.pack_start(image_button, True, True, 0)
 
-        reset_button = Gtk.Button.new_from_icon_name("edit-undo-symbolic", Gtk.IconSize.MENU)
+        reset_button = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
         reset_button.set_relief(Gtk.ReliefStyle.NONE)
         reset_button.set_tooltip_text(reset_tooltip)
         reset_button.connect("clicked", self.on_custom_image_reset_clicked, image_type)
         reset_button.set_valign(Gtk.Align.CENTER)
         button_container.pack_start(reset_button, True, False, 0)
 
-        download_button = Gtk.Button.new_from_icon_name("web-browser-symbolic", Gtk.IconSize.MENU)
+        download_button = Gtk.Button.new_from_icon_name("web-browser-symbolic")
         download_button.set_relief(Gtk.ReliefStyle.NONE)
         download_button.set_tooltip_text(download_tooltip)
         download_button.connect("clicked", self.on_custom_image_download_clicked, image_type)
         download_button.set_valign(Gtk.Align.CENTER)
         button_container.pack_end(download_button, True, False, 0)
 
-        banner_box.add(image_button_container)
+        banner_box.append(image_button_container)
         banner_box.attach_next_to(button_container, image_button_container, Gtk.PositionType.BOTTOM, 1, 1)
 
         self.image_buttons[image_type] = image_button
@@ -622,17 +618,16 @@ class GameInfoBox(AdvancedSettingsBox):
 
 class UrlDialog(Gtk.Dialog):
     def __init__(self, parent):
-        super().__init__(title=_("Enter URL"), transient_for=parent, flags=0)
-        self.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        super().__init__(title=_("Enter URL"), transient_for=parent)
+        self.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
+        self.add_button(_("_OK"), Gtk.ResponseType.OK)
 
         self.set_default_size(300, 100)
 
         box = self.get_content_area()
         self.entry = Gtk.Entry()
         self.entry.set_placeholder_text("https://example.com/image.png")
-        box.add(self.entry)
-
-        self.show_all()
+        box.append(self.entry)
 
     def get_url(self):
         return self.entry.get_text()

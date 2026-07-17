@@ -43,7 +43,7 @@ class InstallerFilesBox(Gtk.ListBox):
             self.add(installer_file_box)
             if installer_file_box.is_ready:
                 self.ready_files.add(installer_file.id)
-        self.show_all()
+        
         self.check_files_ready()
 
     def start_all(self):

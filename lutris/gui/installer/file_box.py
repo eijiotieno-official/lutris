@@ -48,26 +48,26 @@ class InstallerFileBox(Gtk.VBox):
         download_progress.connect("complete", self.on_download_complete)
         download_progress.connect("cancel", self.on_download_cancelled)
         download_progress.connect("error", self.on_download_error)
-        download_progress.show()
+        download_progress.set_visible(True)
         self.installer_file.remove_previous()
         return download_progress
 
     def get_file_provider_widget(self):
         """Return the widget used to track progress of file"""
-        box = Gtk.VBox(spacing=6)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         if self.provider == "download":
             download_progress = self.get_download_progress()
             self.start_func = download_progress.start
             self.stop_func = download_progress.on_cancel_clicked
-            box.pack_start(download_progress, False, False, 0)
+            box.append(download_progress)
             return box
         if self.provider == "pga":
             url_label = InstallerLabel("In cache: %s" % self.installer_file.get_label(), wrap=False)
-            box.pack_start(url_label, False, False, 6)
+            box.append(url_label)
             return box
         if self.provider == "user":
             user_label = InstallerLabel(gtk_safe(self.installer_file.human_url))
-            box.pack_start(user_label, False, False, 0)
+            box.append(user_label)
             return box
         # InstallerFileCollection should not have steam provider
         if self.provider == "steam":
@@ -79,13 +79,13 @@ class InstallerFileBox(Gtk.VBox):
             self.start_func = steam_installer.install_steam_game
             self.stop_func = steam_installer.stop_func
 
-            steam_box = Gtk.HBox(spacing=6)
-            info_box = Gtk.VBox(spacing=6)
+            steam_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             steam_label = InstallerLabel(_("Steam game <b>{appid}</b>").format(appid=steam_installer.appid))
-            info_box.add(steam_label)
+            info_box.append(steam_label)
             self.state_label = InstallerLabel("")
-            info_box.add(self.state_label)
-            steam_box.add(info_box)
+            info_box.append(self.state_label)
+            steam_box.append(info_box)
             return steam_box
         raise ValueError("Invalid provider %s" % self.provider)
 
@@ -107,7 +107,7 @@ class InstallerFileBox(Gtk.VBox):
         combobox = Gtk.ComboBox.new_with_model(self.get_combobox_model())
         combobox.set_id_column(0)
         renderer_text = Gtk.CellRendererText()
-        combobox.pack_start(renderer_text, True)
+        combobox.append(renderer_text)
         combobox.add_attribute(renderer_text, "text", 1)
         combobox.connect("changed", self.on_source_changed)
         combobox.set_active_id(self.provider)
@@ -116,7 +116,7 @@ class InstallerFileBox(Gtk.VBox):
     def replace_file_provider_widget(self):
         """Replace the file provider label and the source button with the actual widget"""
         self.file_provider_widget.destroy()
-        widget_box = self.get_children()[0]
+        widget_box = self.get_first_child()
         if self.started:
             self.file_provider_widget = self.get_file_provider_widget()
             # Also remove the the source button
@@ -124,7 +124,7 @@ class InstallerFileBox(Gtk.VBox):
                 child.destroy()
         else:
             self.file_provider_widget = self.get_file_provider_label()
-        widget_box.pack_start(self.file_provider_widget, True, True, 0)
+        widget_box.append(self.file_provider_widget)
         widget_box.reorder_child(self.file_provider_widget, 0)
         widget_box.show_all()
 
@@ -147,37 +147,37 @@ class InstallerFileBox(Gtk.VBox):
     def get_file_provider_label(self):
         """Return the label displayed before the download starts"""
         if self.provider == "user":
-            box = Gtk.VBox(spacing=6)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             label = InstallerLabel(self.installer_file.get_label())
             label.props.can_focus = True
-            box.pack_start(label, False, False, 0)
+            box.append(label)
             location_entry = FileChooserEntry(self.installer_file.human_url, Gtk.FileChooserAction.OPEN)
             location_entry.connect("changed", self.on_location_changed)
-            location_entry.show()
-            box.pack_start(location_entry, False, False, 0)
+            location_entry.set_visible(True)
+            box.append(location_entry)
             if self.installer_file.is_user_pga_caching_allowed:
                 cache_option = Gtk.CheckButton(_("Cache file for future installations"))
                 cache_option.set_active(self.cache_to_pga)
                 cache_option.connect("toggled", self.on_user_file_cached)
-                box.pack_start(cache_option, False, False, 0)
+                box.append(cache_option)
             return box
         return InstallerLabel(self.installer_file.get_label())
 
     def get_widgets(self):
         """Return the widget with the source of the file and a way to change its source"""
-        box = Gtk.HBox(spacing=12, margin_top=6, margin_bottom=6)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, margin_top=6, margin_bottom=6)
         self.file_provider_widget = self.get_file_provider_label()
-        box.pack_start(self.file_provider_widget, True, True, 0)
-        source_box = Gtk.HBox()
+        box.append(self.file_provider_widget)
+        source_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         source_box.props.valign = Gtk.Align.START
-        box.pack_start(source_box, False, False, 0)
+        box.append(source_box)
 
         aux_info = self.installer_file.auxiliary_info
         if aux_info:
-            source_box.pack_start(InstallerLabel(aux_info), False, False, 0)
-        source_box.pack_start(InstallerLabel(_("Source:")), False, False, 0)
+            source_box.append(InstallerLabel(aux_info))
+        source_box.append(InstallerLabel(_("Source:")))
         combobox = self.get_combobox()
-        source_box.pack_start(combobox, False, False, 0)
+        source_box.append(combobox)
         return box
 
     def on_location_changed(self, widget):

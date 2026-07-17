@@ -68,17 +68,31 @@ def get_widget_window(widget: Gtk.Widget | None) -> Gtk.Window | None:
 TChildWidget = TypeVar("TChildWidget", bound=Gtk.Widget)
 
 
+def iter_widget_children(widget: Gtk.Widget | None) -> Iterable[Gtk.Widget]:
+    """Iterate the direct children of a widget."""
+    if not widget:
+        return
+    child = widget.get_first_child()
+    while child:
+        yield child
+        child = child.get_next_sibling()
+
+
 def get_widget_children(widget: Gtk.Widget | None, child_type: type[TChildWidget] | None = None) -> list[TChildWidget]:
     """Returns the children of any widget; non-containers have no children
     and returns an empty list. This can filter out a specific type of child widget if child_type
     is not None, but otherwise it returns all children."""
-    if isinstance(widget, Gtk.Container):
-        if child_type:
-            return [w for w in widget.get_children() if isinstance(w, child_type)]
-        else:
-            return list(cast(Iterable[TChildWidget], widget.get_children()))
-    else:
-        return []
+    children = list(iter_widget_children(widget))
+    if child_type:
+        return [w for w in children if isinstance(w, child_type)]
+    return list(cast(Iterable[TChildWidget], children))
+
+
+def clear_box_children(box: Gtk.Box, keep_first: int = 0) -> None:
+    """Remove all but the first keep_first children from a Gtk.Box."""
+    children = list(iter_widget_children(box))
+    for child in children[keep_first:]:
+        box.remove(child)
 
 
 def open_uri(uri: str) -> None:

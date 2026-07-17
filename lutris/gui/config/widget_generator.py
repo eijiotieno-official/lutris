@@ -7,17 +7,27 @@ from gettext import gettext as _
 from inspect import Parameter, signature
 from typing import TYPE_CHECKING, Any
 
-from gi.repository import Gdk, Gtk  # type: ignore
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # type: ignore
 
 from lutris.config import LutrisConfig
 from lutris.gui.widgets import NotificationSource
 from lutris.gui.widgets.common import EditableGrid, FileChooserEntry, Label
 from lutris.gui.widgets.searchable_entrybox import SearchableEntrybox
+from lutris.gui.widgets.utils import get_widget_window
 from lutris.util.log import logger
 from lutris.util.strings import gtk_safe
 
 if TYPE_CHECKING:
     from lutris.gui.config.boxes import ConfigBox
+
+
+def _add_to_parent(parent: Gtk.Widget, child: Gtk.Widget) -> None:
+    if isinstance(parent, Adw.PreferencesGroup):
+        parent.add(child)
+    elif isinstance(parent, Gtk.Box):
+        parent.append(child)
+    else:
+        parent.append(child)
 
 
 class WidgetGenerator(ABC):
@@ -49,12 +59,12 @@ class WidgetGenerator(ABC):
         self.changed = NotificationSource()  # takes option_key, new_value
         self.changed.register(self.on_changed, priority=1000)
         self._default_directory: str | None = None
-        self._current_parent: Gtk.Box | None = None
+        self._current_parent: Gtk.Widget | None = None
         self._current_section: str | None = None
 
         # These are outputs set by generate_widget() or generate_container()
         # and they are reset on each call.
-        self.wrapper: Gtk.Box | None = None
+        self.wrapper: Gtk.Widget | None = None
         self.default_value = None
         self.tooltip_default: str | None = None
         self.options: dict[str, dict[str, Any]] = {}
@@ -63,9 +73,9 @@ class WidgetGenerator(ABC):
         self.warning_messages: list[Gtk.Widget] = []
 
         # These accumulate results across all widgets
-        self.wrappers: dict[str, Gtk.Container] = {}
-        self.section_frames: list[SectionFrame] = []
-        self.option_containers: dict[str, Gtk.Container] = {}
+        self.wrappers: dict[str, Gtk.Widget] = {}
+        self.section_frames: list["SectionFrame"] = []
+        self.option_containers: dict[str, Gtk.Widget] = {}
 
         self._generators: dict[str, WidgetGenerator.GeneratorFunction] = {
             "label": self._generate_label,
@@ -109,7 +119,6 @@ class WidgetGenerator(ABC):
         option_container = self.generate_container(option, wrapper)
 
         if option_container and self.parent:
-            # Switch to new section if required
             if not self._current_parent:
                 self._current_parent = self.parent
 
@@ -118,12 +127,12 @@ class WidgetGenerator(ABC):
                 if self._current_section:
                     frame = SectionFrame(self._current_section, visible=True)
                     self.section_frames.append(frame)
-                    self._current_parent = frame.vbox
-                    self.parent.pack_start(frame, False, False, 0)
+                    self._current_parent = frame
+                    _add_to_parent(self.parent, frame)
                 else:
                     self._current_parent = self.parent
 
-            self._current_parent.pack_start(option_container, False, False, 0)
+            _add_to_parent(self._current_parent, option_container)
         return option_container
 
     def generate_container(self, option: dict[str, Any], wrapper: Gtk.Box | None = None) -> Gtk.Widget | None:
@@ -134,20 +143,17 @@ class WidgetGenerator(ABC):
             option_key = option["option"]
             option_container = self.create_option_container(option, self.wrapper)
             self.option_containers[option_key] = option_container
-            option_container.show_all()
 
             option_container.lutris_option_key = option_key  # type:ignore[attr-defined]
             option_container.lutris_option_label = option["label"]  # type:ignore[attr-defined]
             option_container.lutris_option_helptext = option.get("help") or ""  # type:ignore[attr-defined]
 
-            # Mark advanced option containers, to be hidden by checking for this
             option_container.lutris_advanced = bool(option.get("advanced"))  # type:ignore[attr-defined]
             option_container.lutris_option = option  # type:ignore[attr-defined]
 
             self.option_container = option_container
             return option_container
-        else:
-            return None
+        return None
 
     def generate_widget(self, option: dict[str, Any], wrapper: Gtk.Box | None = None) -> Gtk.Widget | None:
         """This creates a wrapper box and a label and widget within it according to the options dict
@@ -166,23 +172,21 @@ class WidgetGenerator(ABC):
         self.warning_messages.clear()
         self.wrappers.pop(option_key, None)
 
-        # Record the options themselves before anything is generated
         self.options[option_key] = option
 
         if wrapper:
-            # Destroy and recreate option widget
-            children = wrapper.get_children()
-            for child in children:
-                child.destroy()
+            children = wrapper.get_first_child()
+            while children:
+                next_child = children.get_next_sibling()
+                wrapper.remove(children)
+                children = next_child
             self.wrapper = wrapper
         else:
             self.wrapper = self.create_wrapper_box(option, value, default)
-
             if not self.wrapper:
                 return None
 
         func = self._generators.get(option_type)
-
         if func:
             option_widget = func(option, value, default)
         else:
@@ -192,22 +196,14 @@ class WidgetGenerator(ABC):
         self.option_widget = option_widget
         self.tooltip_default = self.tooltip_default or (default if isinstance(default, str) else None)
 
-        if option_widget:
-            option_widget.show_all()
-
         self.configure_wrapper_box(self.wrapper, option, value, default)
         self.configure_warning_messages(option)
         return option_widget
 
     def configure_wrapper_box(self, wrapper: Gtk.Widget, option: dict[str, Any], value: Any, default: Any) -> None:
-        """Configures the wrapper box after it is created; this sets its tooltip, sensitivity, and
-        creates warning message boxes."""
-
-        # Attach a tooltip to the wrapper
         tooltip = self.get_tooltip(option, value, default)
-        if tooltip:
-            wrapper.props.has_tooltip = True
-            wrapper.connect("query-tooltip", self.on_query_tooltip, tooltip)
+        if tooltip and hasattr(wrapper, "set_subtitle"):
+            wrapper.set_subtitle(tooltip)  # type: ignore[attr-defined]
 
     def get_tooltip(self, option: dict[str, Any], value: Any, default: Any):
         tooltip = option.get("help")
@@ -217,74 +213,51 @@ class WidgetGenerator(ABC):
         return tooltip
 
     def configure_warning_messages(self, option: dict[str, Any]):
-        # Add message boxes under the widget
         if "error" in option:
             self.warning_messages.append(ConfigErrorBox(option["error"]))
 
         if "warning" in option:
             self.warning_messages.append(ConfigWarningBox(option["warning"]))
 
-    def create_wrapper_box(self, option: dict[str, Any], value: Any, default: Any) -> Gtk.Box | None:
-        """This creates the wrapper, which becomes the 'wrapper' attribute and which build_option_widget()
-        populates. Returns None if the option is not visible; in that case no widget is generated either."""
-
+    def create_wrapper_box(self, option: dict[str, Any], value: Any, default: Any) -> Gtk.Widget | None:
         available = self._evaluate_flag_option("available", option)
-
         if not available:
-            # If not available, there's no wrapper, and no widget!
             return None
+        return Adw.ActionRow(title=option.get("label", ""))
 
-        return Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, margin_bottom=6, visible=True)
-
-    def create_option_container(self, option: dict[str, Any], wrapper: Gtk.Container) -> Gtk.Container:
-        """This creates a wrapper box around the widget wrapper, to support additional controls. The
-        base implementation wraps 'wrapper' in a Box with the error and warning widgets; if
-        there are none it just returns 'wrapper'."""
-
+    def create_option_container(self, option: dict[str, Any], wrapper: Gtk.Widget) -> Gtk.Widget:
         if self.warning_messages:
             option_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=True)
-            option_container.pack_start(wrapper, False, False, 0)
-
+            option_container.append(wrapper)
             for widget in self.warning_messages:
-                option_container.pack_start(widget, False, False, 0)
-
+                option_container.append(widget)
             return option_container
-        else:
-            return wrapper
+        return wrapper
 
     def build_option_widget(
         self, option: dict[str, Any], widget: Gtk.Widget | None, no_label: bool = False, expand: bool = True
     ) -> Gtk.Widget | None:
-        """This is called by the generator methods to place their widget into the wrapper, usually with
-        a label taken from 'option'.
-
-        The default labeling and placement is suitable for our ConfigBoxes, but we override this to
-        get a different layout for PreferencesBox.
-
-        Some generators do their own labelling, and pass True for no_label; this method will
-        pack the widget with no label in that case.
-
-        This method returns the widget."""
-        if self.wrapper:
-            if not no_label and "label" in option:
-                label = option["label"]
-                label = Label(label)
-                self.wrapper.pack_start(label, False, False, 0)
-
-            if widget:
+        if self.wrapper and widget:
+            if isinstance(self.wrapper, Adw.ActionRow):
+                if no_label:
+                    self.wrapper.set_activatable_widget(widget)
+                else:
+                    self.wrapper.set_activatable_widget(widget)
+            elif isinstance(self.wrapper, Gtk.Box):
+                if not no_label and "label" in option:
+                    label = Label(option["label"])
+                    self.wrapper.append(label)
                 option_size = option.get("size", None)
                 if option_size:
                     expand = option_size != "small"
-
-                self.wrapper.pack_start(widget, expand, expand, 0)
+                if expand:
+                    widget.set_hexpand(True)
+                self.wrapper.append(widget)
         return widget
 
     # Dynamic Widget Updates
 
     def update_widgets(self) -> None:
-        """Call this to update the visibility, sensitivity and other properties of
-        the widgets, wrappers and containers already generated."""
-
         for option_key, container in self.option_containers.items():
             if hasattr(container, "lutris_option"):
                 option = container.lutris_option
@@ -294,32 +267,23 @@ class WidgetGenerator(ABC):
         for frame in self.section_frames:
             visible = frame.has_visible_children()
             frame.set_visible(visible)
-            frame.set_no_show_all(not visible)
 
-    def update_option_container(self, option, container: Gtk.Container, wrapper: Gtk.Container):
-        """This method updates an option container and its wrapper; this re-evaluates the
-        relevant options in case they contain callables and those callables return different
-        results."""
-
-        # Update messages in message boxes that support it
-        for child in container.get_children():
+    def update_option_container(self, option, container: Gtk.Widget, wrapper: Gtk.Widget):
+        child = container.get_first_child()
+        while child:
             if hasattr(child, "update_message"):
                 child.update_message(option, self)
+            child = child.get_next_sibling()
 
-        # Hide entire container if the option is not visible
         visible = self.get_visibility(option)
         container.set_visible(visible)
-        container.set_no_show_all(not visible)
 
-        # Grey out option if condition unmet, or if a second setting is False
         condition: bool = self.get_condition(option)
         wrapper.set_sensitive(condition)
 
     # Widget factories
 
-    # Label
     def _generate_label(self, option, value, default):
-        """Generate a simple label."""
         text = option["label"]
         label = Label(text)
         label.set_use_markup(True)
@@ -327,100 +291,96 @@ class WidgetGenerator(ABC):
         label.set_valign(Gtk.Align.CENTER)
         return self.build_option_widget(option, label, no_label=True)
 
-    # Entry
     def _generate_string(self, option, value, default):
-        """Generate an entry box."""
-
         def on_changed(entry):
-            """Action triggered for entry 'changed' signal."""
             self.changed.fire(option_key, entry.get_text())
 
         option_key = option["option"]
+        if isinstance(self.wrapper, Adw.EntryRow):
+            row = self.wrapper
+            row.set_text(value or default or "")
+            row.connect("changed", on_changed)
+            return row
 
         entry = Gtk.Entry()
         entry.set_text(value or default or "")
         entry.connect("changed", on_changed)
         return self.build_option_widget(option, entry)
 
-    # Switch
     def _generate_bool(self, option, value, default):
-        """Generate a switch."""
-
         def on_notify_active(widget, _gparam):
-            """Action for the switch's toggled signal."""
             self.changed.fire(option_key, widget.get_active())
 
         def to_bool(to_convert):
-            """Convert values to booleans in a way that won't decide that
-            the string 'False' is True!"""
             if to_convert is None:
                 return None
-            elif isinstance(to_convert, str):
+            if isinstance(to_convert, str):
                 text = to_convert.casefold().strip()
                 if text == "true":
                     return True
-                elif text == "false":
+                if text == "false":
                     return False
-                else:
-                    return None
-            else:
-                return bool(to_convert)
+                return None
+            return bool(to_convert)
 
         option_key = option["option"]
-
         active = to_bool(value)
         if active is None:
             active = bool(to_bool(default))
 
-        switch = Gtk.Switch(active=active, valign=Gtk.Align.CENTER)
-        switch.connect("notify::active", on_notify_active)
-
+        row = Adw.SwitchRow(title=option["label"])
+        row.set_active(active)
+        row.connect("notify::active", on_notify_active)
+        self.wrapper = row
         self.tooltip_default = _("Enabled") if to_bool(default) else _("Disabled")
-        return self.build_option_widget(option, switch, expand=False)
+        return row
 
-    # SpinButton
     def _generate_range(self, option, value, default):
-        """Generate a ranged spin button."""
-
-        def on_changed(widget):
-            """Action triggered on spin button 'changed' signal."""
-            new_value = widget.get_value_as_int()
-            self.changed.fire(option_key, new_value)
+        def on_changed(widget, _gparam):
+            self.changed.fire(option_key, widget.get_value())
 
         option_key = option["option"]
         min_val = option["min"]
         max_val = option["max"]
 
-        adjustment = Gtk.Adjustment(float(min_val), float(min_val), float(max_val), 1, 0, 0)
-        spin_button = Gtk.SpinButton()
-        spin_button.set_adjustment(adjustment)
-        spin_button.set_value(value if value is not None else (default if default is not None else 0))
-        spin_button.connect("changed", on_changed)
-        return self.build_option_widget(option, spin_button)
+        adjustment = Gtk.Adjustment.new(
+            value if value is not None else (default if default is not None else min_val),
+            min_val,
+            max_val,
+            1,
+            0,
+            0,
+        )
+        row = Adw.SpinRow(title=option["label"])
+        row.set_adjustment(adjustment)
+        row.connect("notify::value", on_changed)
+        self.wrapper = row
+        return row
 
-    # ComboBox
+    def _populate_combo_row(self, row: Adw.ComboRow, expanded, value, default):
+        model = Gtk.StringList()
+        values = []
+        tooltip_default = None
+        for choice_ui, choice_value in expanded:
+            model.append(choice_ui)
+            values.append(choice_value)
+            if choice_value == default:
+                tooltip_default = choice_ui
+        row.set_model(model)
+        if value in values:
+            row.set_selected(values.index(value))
+        elif default in values:
+            row.set_selected(values.index(default))
+        if tooltip_default:
+            self.tooltip_default = str(tooltip_default)
+        return values
+
     def _generate_choice(self, option, value, default, has_entry=False):
-        """Generate a combobox (drop-down menu)."""
-
-        def populate_combobox_choices():
-            expanded, tooltip_default, _valid_choices = expand_combobox_choices()
-            for choice in expanded:
-                liststore.append(choice)
-
-            if tooltip_default:
-                self.tooltip_default = str(tooltip_default)
-
         def expand_combobox_choices():
             expanded = []
             tooltip_default = None
             valid = []
             has_value = False
-            # The following types are supported as combobox choices
-            # list[list[str] where length = 2]
-            # list[tuple[str, str]]
-            # tuple[tuple[str, str]]
-            # list[str]
-            # Mapping[str, str]
             choice_iterable = None
             if isinstance(choices, Mapping):
                 choice_iterable = choices.items()
@@ -448,15 +408,14 @@ class WidgetGenerator(ABC):
                 expanded.insert(0, (value, value))
             return expanded, tooltip_default, valid
 
-        def on_combobox_scroll(widget, _event):
-            """Prevents users from accidentally changing configuration values
-            while scrolling down dialogs.
-            """
-            widget.stop_emission_by_name("scroll-event")
-            return False
+        def on_combo_changed(row, _gparam):
+            selected = row.get_selected()
+            if selected < 0:
+                return
+            option_value = row_values[selected]
+            self.changed.fire(option_key, option_value)
 
         def on_combobox_change(widget):
-            """Action triggered on combobox 'changed' signal."""
             list_store = widget.get_model()
             active = widget.get_active()
             option_value = None
@@ -468,77 +427,60 @@ class WidgetGenerator(ABC):
             self.changed.fire(option_key, option_value)
 
         option_key = option["option"]
-        choices_src = option.get("choices")  # raw value before evaluation, for reload hook
+        choices_src = option.get("choices")
         choices = self._evaluate_option("choices", None, option)
+        expanded_choices, _tooltip_default, valid_choices = expand_combobox_choices()
 
-        liststore = Gtk.ListStore(str, str)
-        populate_combobox_choices()
-        # With entry ("choice_with_entry" type)
         if has_entry:
+            liststore = Gtk.ListStore(str, str)
+            for choice in expanded_choices:
+                liststore.append(choice)
             combobox = Gtk.ComboBox.new_with_model_and_entry(liststore)
             combobox.set_entry_text_column(0)
-        # No entry ("choice" type)
-        else:
-            combobox = Gtk.ComboBox.new_with_model(liststore)
-            cell = Gtk.CellRendererText()
-            combobox.pack_start(cell, True)
-            combobox.add_attribute(cell, "text", 0)
+            if value in [v for _k, v in expanded_choices]:
+                combobox.set_active_id(value)
+            elif value:
+                for ch in combobox.get_children():
+                    if isinstance(ch, Gtk.Entry):
+                        ch.set_text(value or "")
+                        break
+            else:
+                combobox.set_active_id(default)
+            combobox.connect("changed", on_combobox_change)
+            combobox.set_valign(Gtk.Align.CENTER)
+            self._prevent_combobox_scroll(combobox)
+            return self.build_option_widget(option, combobox)
 
-        combobox.set_id_column(1)
-
-        expanded_choices, _tooltip_default, valid_choices = expand_combobox_choices()
-        if value in [v for _k, v in expanded_choices]:
-            combobox.set_active_id(value)
-        elif has_entry:
-            for ch in combobox.get_children():
-                if isinstance(ch, Gtk.Entry):
-                    ch.set_text(value or "")
-                    break
-        else:
-            combobox.set_active_id(default)
-
-        combobox.connect("changed", on_combobox_change)
-        combobox.connect("scroll-event", on_combobox_scroll)
-        combobox.set_valign(Gtk.Align.CENTER)
+        row = Adw.ComboRow(title=option["label"])
+        row_values = self._populate_combo_row(row, expanded_choices, value, default)
+        row.connect("notify::selected", on_combo_changed)
+        self.wrapper = row
 
         def get_invalidity_error(key: str):
             v = self.get_setting(key, self.get_default(option))
             if v in valid_choices:
                 return None
-
             return _("The setting '%s' is no longer available. You should select another choice.") % v
 
-        if not has_entry and value not in valid_choices:
+        if value not in valid_choices:
             self.warning_messages.append(ConfigWarningBox(get_invalidity_error))
 
-        # Async choices protocol: if the choices callable has a register_reload_callback attribute,
-        # it supports background loading. The callable returns [] immediately when data isn't ready
-        # yet and kicks off a background fetch; callers register a callback to be invoked on the
-        # UI thread when loading completes, at which point the combobox is repopulated in place.
         if callable(choices_src) and hasattr(choices_src, "register_reload_callback"):
 
             def reload_choices():
-                nonlocal choices
+                nonlocal choices, row_values
                 choices = self.evaluate_option_value(choices_src, option=option)
-                liststore.clear()
-                populate_combobox_choices()
-                # The initial set_active_id() will have failed if the value wasn't in the empty
-                # list; try again now that the choices are populated.
-                if value and not combobox.get_active_id():
-                    combobox.set_active_id(value)
+                expanded, _, _valid = expand_combobox_choices()
+                row_values = self._populate_combo_row(row, expanded, value, default)
 
             choices_src.register_reload_callback(reload_choices)
 
-        return self.build_option_widget(option, combobox)
+        return row
 
-    # ComboBox
     def _generate_choice_with_entry(self, option, value, default):
         return self._generate_choice(option, value, default, has_entry=True)
 
-    # Searchable Entry
     def _generate_choice_with_search(self, option, value, default):
-        """Generate a searchable combo box"""
-
         def on_changed(_widget, new_value):
             self.changed.fire(option_key, new_value)
 
@@ -552,14 +494,9 @@ class WidgetGenerator(ABC):
 
         return self.build_option_widget(option, entrybox)
 
-    # FileChooserEntry
     def _generate_file(self, option, value, default, shell_quoting=False):
-        """Generate a file chooser button to select a file."""
-
         def on_changed(entry):
-            """Action triggered when the field's content changes."""
-            text = entry.get_text()
-            self.changed.fire(option_key, text)
+            self.changed.fire(option_key, entry.get_text())
 
         option_key = option["option"]
         warn_if_non_writable_parent = bool(option.get("warn_if_non_writable_parent"))
@@ -583,7 +520,6 @@ class WidgetGenerator(ABC):
         )
 
         if value:
-            # If path is relative, complete with default directory
             if not os.path.isabs(value):
                 value = os.path.expanduser(value)
                 if not os.path.isabs(value):
@@ -592,101 +528,87 @@ class WidgetGenerator(ABC):
 
         file_chooser.set_valign(Gtk.Align.CENTER)
         file_chooser.connect("changed", on_changed)
-
         return self.build_option_widget(option, file_chooser)
 
-    # FileChooserEntry
     def _generate_command_line(self, option, value, default):
         return self._generate_file(option, value, default, shell_quoting=True)
 
-    # TreeView
     def _generate_multiple_file(self, option, value, default):
-        """Generate a multiple file selector."""
-
         def on_add_files_clicked(_widget):
-            """Create and run multi-file chooser dialog."""
+            dialog = Gtk.FileDialog(title=_("Select files"))
+            dialog.set_initial_folder(Gio.File.new_for_path(first_file_dir or self.default_directory))
 
-            dialog = Gtk.FileChooserNative.new(
-                _("Select files"),
-                None,
-                Gtk.FileChooserAction.OPEN,
-                _("_Add"),
-                _("_Cancel"),
-            )
-            dialog.set_select_multiple(True)
+            parent = get_widget_window(self.parent)
+            if parent:
+                dialog.set_transient_for(parent)
 
-            files = [row[0] for row in files_list_store]
-            first_file_dir = os.path.dirname(files[0]) if files else None
-            dialog.set_current_folder(first_file_dir or self.default_directory)
-            response = dialog.run()
-            if response == Gtk.ResponseType.ACCEPT:
-                for filename in dialog.get_filenames():
-                    if filename not in files:
+            def on_files_selected(_dlg, result):
+                try:
+                    files = dialog.open_multiple_finish(result)
+                except GLib.Error:
+                    return
+                for gfile in files:
+                    filename = gfile.get_path()
+                    if filename and filename not in files_paths:
                         files_list_store.append([filename])
-                        files.append(filename)
-                self.changed.fire(option_key, files)
-            dialog.destroy()
+                        files_paths.append(filename)
+                self.changed.fire(option_key, files_paths)
 
-        def on_files_treeview_keypress(treeview, event):
-            """Action triggered when a row is deleted from the filechooser."""
-            if event.keyval == Gdk.KEY_Delete:
-                selection = treeview.get_selection()
-                (model, treepaths) = selection.get_selected_rows()
+            dialog.open_multiple(parent, None, on_files_selected)
+
+        def on_files_treeview_keypress(_treeview, keyval, _keycode, _state):
+            if keyval == Gdk.KEY_Delete:
+                selection = files_treeview.get_selection()
+                model, treepaths = selection.get_selected_rows()
                 for treepath in treepaths:
                     treeiter = model.get_iter(treepath)
                     model.remove(treeiter)
-
-                    files = [row[0] for row in files_list_store]
-                    self.changed.fire(option_key, files)
+                self.changed.fire(option_key, [row[0] for row in files_list_store])
 
         option_key = option["option"]
         label = option["label"]
 
         files_list_store = Gtk.ListStore(str)
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        label = Label(label + ":")
-        label.set_halign(Gtk.Align.START)
+        label_widget = Label(label + ":")
+        label_widget.set_halign(Gtk.Align.START)
         button = Gtk.Button(label=_("Add Files"))
         button.connect("clicked", on_add_files_clicked)
-        button.set_margin_left(10)
-        vbox.pack_start(label, False, False, 5)
-        vbox.pack_end(button, False, False, 0)
+        button.set_margin_start(10)
+        vbox.append(label_widget)
+        vbox.append(button)
 
         if not value:
             value = default
 
         if value:
-            if isinstance(value, str):
-                files = [value]
-            else:
-                files = value
+            files_paths = [value] if isinstance(value, str) else list(value)
         else:
-            files = []
-        for filename in files:
+            files_paths = []
+
+        for filename in files_paths:
             files_list_store.append([filename])
+
+        first_file_dir = os.path.dirname(files_paths[0]) if files_paths else None
+
         cell_renderer = Gtk.CellRendererText()
         files_treeview = Gtk.TreeView(model=files_list_store)
         files_column = Gtk.TreeViewColumn(_("Files"), cell_renderer, text=0)
         files_treeview.append_column(files_column)
-        files_treeview.connect("key-press-event", on_files_treeview_keypress)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", on_files_treeview_keypress)
+        files_treeview.add_controller(key_controller)
         treeview_scroll = Gtk.ScrolledWindow()
         treeview_scroll.set_min_content_height(130)
-        treeview_scroll.set_margin_left(10)
-        treeview_scroll.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
+        treeview_scroll.set_margin_start(10)
         treeview_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        treeview_scroll.add(files_treeview)
-
-        vbox.pack_start(treeview_scroll, True, True, 0)
+        treeview_scroll.set_child(files_treeview)
+        vbox.append(treeview_scroll)
         return self.build_option_widget(option, vbox, no_label=True)
 
-    # FileChooserEntry
     def _generate_directory(self, option, value, default):
-        """Generate a file chooser button to select a directory."""
-
         def on_changed(entry):
-            """Action triggered when the field's content changes."""
-            text = entry.get_text()
-            self.changed.fire(option_key, text)
+            self.changed.fire(option_key, entry.get_text())
 
         option_key = option["option"]
         warn_if_non_writable_parent = bool(option.get("warn_if_non_writable_parent"))
@@ -705,10 +627,7 @@ class WidgetGenerator(ABC):
         directory_chooser.set_valign(Gtk.Align.CENTER)
         return self.build_option_widget(option, directory_chooser)
 
-    # EditableGrid
     def _generate_mapping(self, option, value, default):
-        """Adds an editable grid widget"""
-
         def on_changed(widget):
             values = dict(widget.get_data())
             self.changed.fire(option_key, values)
@@ -726,38 +645,24 @@ class WidgetGenerator(ABC):
         return self.build_option_widget(option, grid)
 
     @staticmethod
-    def on_query_tooltip(_widget, _x, _y, _keybmode, tooltip, text):  # pylint: disable=unused-argument
-        """Prepare a custom tooltip with a fixed width"""
-        label = Label(text)
-        label.set_use_markup(True)
-        label.set_max_width_chars(60)
-        event_box = Gtk.EventBox()
-        event_box.add(label)
-        event_box.show_all()
-        tooltip.set_custom(event_box)
-        return True
+    def _prevent_combobox_scroll(combobox: Gtk.ComboBox) -> None:
+        controller = Gtk.EventControllerScroll()
+        controller.connect("scroll", lambda *_args: True)
+        combobox.add_controller(controller)
 
     # Option access
 
     @abstractmethod
     def get_setting(self, option_key: str, default: Any) -> Any:
-        """Reads the current value for a specific setting; this method must be
-        implemented by a subclass."""
         raise NotImplementedError()
 
     def get_default(self, option: dict[str, Any]) -> Any:
-        """Returns the default value from the option; if it is callable, this calls
-        it to get the actual default."""
         return self._evaluate_option("default", default=None, option=option)
 
     def get_visibility(self, option: dict[str, Any]) -> bool:
-        """Extracts the 'visible' option; if the option is missing this returns
-        True, and if it is callable this calls it. Subclasses can add further conditions."""
         return self._evaluate_flag_option("visible", option)
 
     def get_condition(self, option: dict[str, Any]) -> bool:
-        """Extracts the 'condition' option; but also the 'conditional_on' option, and if both
-        are present, then if either indicates the control should be disabled this will be false.."""
         condition = self._evaluate_flag_option("condition", option)
         conditional_on = option.get("conditional_on")
 
@@ -767,76 +672,59 @@ class WidgetGenerator(ABC):
                 return False
 
         container = self.option_containers[option["option"]]
-
-        for child in container.get_children():
+        child = container.get_first_child()
+        while child:
             if hasattr(child, "blocks_sensitivity") and child.blocks_sensitivity:
                 return False
+            child = child.get_next_sibling()
 
         return condition
 
     def _evaluate_flag_option(self, key: str, option: dict[str, Any]) -> bool:
-        """Evaluates a flag option; if is None or missing this returns True, and if
-        it is callable this calls it (as with _evaluate_option) and converts
-        the result to a bool."""
         flag = self._evaluate_option(key, default=True, option=option)
         return bool(flag) if flag is not None else True
 
     def _evaluate_option(self, key: str, default: Any, option: dict[str, Any]) -> Any:
-        """Evaluates an option; if is missing, then function returns 'default', and
-        if it is callable this calls it, passing the option key, generator's args and kwargs.
-
-        The callable may take fewer arguments; if so, this will pass as many argments
-        as it will take, even if that is none at all."""
-
         if key not in option:
             return default
-
         value = option[key]
         return self.evaluate_option_value(value, option=option)
 
     def evaluate_option_value(self, value: Any, option: dict[str, Any]) -> Any:
-        """Evaluates the 'value' given, if it is callable. If not, this method just
-        returns the 'value'.
-
-        The 'value' is called with the option-key and then all the callback arguments
-        given to this generator's __init__. If the 'value' takes fewer arguments than
-        this, trailing arguments are omitted."""
         if callable(value):
             sig = signature(value)
             argcount = len(sig.parameters)
-
             option_key = option["option"]
             argsneeded = 1 + len(self.callback_args)
 
-            if argcount >= argsneeded:  # enough declared args?
+            if argcount >= argsneeded:
                 return value(option_key, *self.callback_args, **self.callback_kwargs)
-            elif any(p.kind == Parameter.VAR_POSITIONAL for p in sig.parameters.values()):  # unlimited args via *args?
+            if any(p.kind == Parameter.VAR_POSITIONAL for p in sig.parameters.values()):
                 return value(option_key, *self.callback_args, **self.callback_kwargs)
-            elif argcount == 0:  # no args?
+            if argcount == 0:
                 return value(**self.callback_kwargs)
-            else:  # any other number of args
-                args = list(self.callback_args)
-                args.insert(0, option_key)
-                args = args[:argcount]
-                return value(*args, **self.callback_kwargs)
+            args = list(self.callback_args)
+            args.insert(0, option_key)
+            args = args[:argcount]
+            return value(*args, **self.callback_kwargs)
 
         return value
 
 
-class SectionFrame(Gtk.Frame):
-    """A frame that is styled to have particular margins, and can have its frame hidden.
-    This leaves the content but removes the margins and borders and all that, so it looks
-    like the frame was never there."""
+class SectionFrame(Adw.PreferencesGroup):
+    """A preferences group for a configuration section."""
 
     def __init__(self, section, **kwargs):
-        super().__init__(label=section, **kwargs)
+        super().__init__(title=section, **kwargs)
         self.section = section
-        self.vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=True)
-        self.add(self.vbox)
-        self.get_style_context().add_class("section-frame")
 
     def has_visible_children(self):
-        return any(w for w in self.vbox.get_children() if w.get_visible())
+        child = self.get_first_child()
+        while child:
+            if child.get_visible():
+                return True
+            child = child.get_next_sibling()
+        return False
 
 
 class WidgetWarningMessageBox(Gtk.Box):
@@ -846,29 +734,25 @@ class WidgetWarningMessageBox(Gtk.Box):
         super().__init__(
             spacing=6,
             visible=False,
-            margin_left=margin_left,
-            margin_right=margin_right,
+            margin_start=margin_left,
+            margin_end=margin_right,
             margin_bottom=margin_bottom,
-            no_show_all=True,
         )
 
         self.image = Gtk.Image(visible=True)
-        self.image.set_from_icon_name(icon_name, Gtk.IconSize.DND)
-        self.pack_start(self.image, False, False, 0)
+        self.image.set_from_icon_name(icon_name)
+        self.append(self.image)
         self.label = Gtk.Label(visible=True, xalign=0)
-        self.label.set_line_wrap(True)
-        self.pack_start(self.label, False, False, 0)
+        self.label.set_wrap(True)
+        self.append(self.label)
 
     def show_markup(self, markup, icon_name=None) -> bool:
-        """Displays the markup given, and shows this box. If markup is empty or None,
-        this hides the box instead. If icon_name is given, the box's icon is switched
-        to it. Returns the new visibility."""
         visible = bool(markup)
 
         if markup:
             self.label.set_markup(str(markup))
             if icon_name:
-                self.image.set_from_icon_name(icon_name, Gtk.IconSize.DND)
+                self.image.set_from_icon_name(icon_name)
 
         self.set_visible(visible)
         return visible
@@ -881,7 +765,6 @@ class ConfigMessageBox(WidgetWarningMessageBox):
 
         if not callable(message):
             text = gtk_safe(message)
-
             if text:
                 self.label.set_markup(str(text))
 
@@ -906,6 +789,4 @@ class ConfigErrorBox(ConfigMessageBox):
 
     @property
     def blocks_sensitivity(self):
-        """Called to check if the wrapper should be made insensitive
-        because of this error box."""
         return self.get_visible()

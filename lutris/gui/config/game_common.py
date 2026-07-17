@@ -5,7 +5,7 @@ from collections.abc import Callable
 from gettext import gettext as _
 from typing import TYPE_CHECKING
 
-from gi.repository import Gtk
+from gi.repository import Adw, Gtk
 
 from lutris import settings
 from lutris.config import LutrisConfig, make_game_config_id, rename_config
@@ -38,9 +38,9 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         super().__init__(title, parent=parent, border_width=0)
         self.config_level = config_level
         self.set_default_size(DIALOG_WIDTH, DIALOG_HEIGHT)
-        self.vbox.set_border_width(0)
 
-        self.notebook: Gtk.Notebook = None
+        self.view_stack: Gtk.Stack = None
+        self.view_switcher: Adw.ViewSwitcher = None
 
         self.info_box: GameInfoBox = None
         self.runner_box = None
@@ -48,48 +48,63 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         self.timer_id = None
         self.game: Game = None
         self.saved = None
-        self.option_page_indices = set()
-        self.searchable_page_indices = set()
+        self.option_page_names: set[str] = set()
+        self.searchable_page_names: set[str] = set()
         self.advanced_switch_widgets = []
         self.header_bar_widgets = []
         self.game_box = None
         self.system_box: SystemConfigBox = None
         self.runner_name = None
         self.lutris_config: LutrisConfig = None
-        self.notebook_page_generators = {}
-        self.notebook_page_updater = {}
+        self.stack_page_generators: dict[str, Callable[[], None]] = {}
+        self.stack_page_updaters: dict[str, Callable[[], None]] = {}
 
         self.build_header_bar()
+        self.build_view_stack()
 
     @staticmethod
     def build_scrolled_window(widget: Gtk.Widget) -> Gtk.ScrolledWindow:
-        """Return a scrolled window containing config widgets"""
         scrolled_window = Gtk.ScrolledWindow(visible=True)
         scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scrolled_window.add(widget)
+        scrolled_window.set_child(widget)
         return scrolled_window
 
-    def build_notebook(self) -> None:
-        self.notebook = Gtk.Notebook(visible=True)
-        self.notebook.set_show_border(False)
-        self.notebook.connect("switch-page", self.on_notebook_switch_page)
-        self.vbox.pack_start(self.notebook, True, True, 0)
+    def build_view_stack(self) -> None:
+        self.view_stack = Gtk.Stack(visible=True)
+        self.view_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.view_stack.connect("notify::visible-child", self.on_stack_visible_child_changed)
 
-    def on_notebook_switch_page(self, notebook: Gtk.Notebook, page: Gtk.Widget, index: int) -> None:
-        generator = self.notebook_page_generators.get(index)
+        self.view_switcher = Adw.ViewSwitcher()
+        self.view_switcher.set_stack(self.view_stack)
+        self.view_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+
+        header_bar = self.get_header_bar()
+        header_bar.set_title_widget(self.view_switcher)
+
+        self.vbox.append(self.view_stack)
+
+    def on_stack_visible_child_changed(self, _stack: Gtk.Stack, _pspec) -> None:
+        page_name = self.view_stack.get_visible_child_name()
+        if not page_name:
+            return
+
+        generator = self.stack_page_generators.get(page_name)
         if generator:
             generator()
-            del self.notebook_page_generators[index]
+            del self.stack_page_generators[page_name]
         else:
-            updater = self.notebook_page_updater.get(index)
+            updater = self.stack_page_updaters.get(page_name)
             if updater:
                 updater()
 
-        self.update_advanced_switch_visibility(index)
-        self.update_search_entry_visibility(index)
+        self.update_advanced_switch_visibility(page_name)
+        self.update_search_entry_visibility(page_name)
+
+    def build_notebook(self) -> None:
+        """Backward-compatible alias for building the view stack."""
+        pass
 
     def build_tabs(self) -> None:
-        """Build tabs (for game and runner levels)"""
         self.timer_id = None
         if self.config_level == "game":
             self._build_info_tab()
@@ -97,50 +112,47 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         self._build_runner_tab()
         self._build_system_tab()
 
-        current_page_index = self.notebook.get_current_page()
-        self.update_advanced_switch_visibility(current_page_index)
-        self.update_search_entry_visibility(current_page_index)
+        current_page_name = self.view_stack.get_visible_child_name()
+        if current_page_name:
+            self.update_advanced_switch_visibility(current_page_name)
+            self.update_search_entry_visibility(current_page_name)
 
     def set_header_bar_widgets_visibility(self, value: bool) -> None:
         for widget in self.header_bar_widgets:
             widget.set_visible(value)
 
-    def update_advanced_switch_visibility(self, current_page_index: int) -> None:
-        if self.notebook:
-            show_switch = current_page_index in self.option_page_indices
+    def update_advanced_switch_visibility(self, current_page_name: str) -> None:
+        if self.view_stack:
+            show_switch = current_page_name in self.option_page_names
             for widget in self.advanced_switch_widgets:
                 widget.set_visible(show_switch)
 
-    def update_search_entry_visibility(self, current_page_index: int) -> None:
-        """Shows or hides the search entry according to what page is currently displayed."""
-        if self.notebook:
-            show_search = current_page_index in self.searchable_page_indices
+    def update_search_entry_visibility(self, current_page_name: str) -> None:
+        if self.view_stack:
+            show_search = current_page_name in self.searchable_page_names
             self.set_search_entry_visibility(show_search)
 
     def set_search_entry_visibility(
         self, show_search: bool, placeholder_text: str | None = None, tooltip_markup: str | None = None
     ) -> None:
-        """Explicitly shows or hides the search entry; can also update the placeholder text."""
         header_bar = self.get_header_bar()
         if show_search and self.search_entry:
-            header_bar.set_custom_title(self.search_entry)
+            header_bar.set_title_widget(self.search_entry)
             self.search_entry.set_placeholder_text(placeholder_text or self.get_search_entry_placeholder())
             self.search_entry.set_tooltip_markup(tooltip_markup)
-        else:
-            header_bar.set_custom_title(None)
+        elif self.view_switcher:
+            header_bar.set_title_widget(self.view_switcher)
 
     def get_search_entry_placeholder(self) -> str:
         if self.game and self.game.name:
             return _("Search %s options") % self.game.name
-
         return _("Search options")
 
     def _build_info_tab(self) -> None:
         self.info_box = GameInfoBox(parent_widget=self, game=self.game)
-
         info_sw = self.build_scrolled_window(self.info_box)
-        page_index = self._add_notebook_tab(info_sw, _("Game info"))
-        self.option_page_indices.add(page_index)
+        page_name, _page_index = self._add_stack_page(info_sw, _("Game info"))
+        self.option_page_names.add(page_name)
 
     def on_move_clicked(self, _button: Gtk.Button) -> None:
         game_directory = self.game.directory if self.game else ""
@@ -152,7 +164,6 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         move_dialog.move()
 
     def on_game_moved(self, dialog: MoveDialog) -> None:
-        """Show a notification when the game is moved"""
         new_directory = dialog.new_directory
         if new_directory:
             self.game = Game(self.game.id if self.game else None)
@@ -210,7 +221,7 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
 
     def _build_options_tab(
         self,
-        notebook_label: str,
+        page_label: str,
         box_factory: Callable[[], "ConfigBox"],
         advanced: bool = True,
         searchable: bool = True,
@@ -218,73 +229,76 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         if not self.lutris_config:
             raise RuntimeError("Lutris config not loaded yet")
         config_box = box_factory()
-        page_index = self._add_notebook_tab(self.build_scrolled_window(config_box), notebook_label)
+        page_name, page_index = self._add_stack_page(self.build_scrolled_window(config_box), page_label)
 
-        self.notebook_page_updater[page_index] = config_box.update_widgets
+        self.stack_page_updaters[page_name] = config_box.update_widgets
 
         if page_index == 0:
             config_box.generate_widgets()
         else:
-            self.notebook_page_generators[page_index] = config_box.generate_widgets
+            self.stack_page_generators[page_name] = config_box.generate_widgets
 
         if advanced:
-            self.option_page_indices.add(page_index)
+            self.option_page_names.add(page_name)
         if searchable:
-            self.searchable_page_indices.add(page_index)
+            self.searchable_page_names.add(page_name)
         return config_box
 
-    def _build_missing_options_tab(self, missing_label: str, notebook_label: str) -> None:
-        label = Gtk.Label(label=self.no_runner_label)
-        page_index = self._add_notebook_tab(label, notebook_label)
-        self.option_page_indices.add(page_index)
+    def _get_first_page_name(self) -> str | None:
+        if self.view_stack.get_n_pages() > 0:
+            return self.view_stack.get_nth_page(0).get_name()
+        return None
 
-    def _add_notebook_tab(self, widget: Gtk.Widget, label: str) -> int:
-        return self.notebook.append_page(widget, Gtk.Label(label=label))
+    def _build_missing_options_tab(self, missing_label: str, page_label: str) -> None:
+        label = Gtk.Label(label=missing_label)
+        page_name, _page_index = self._add_stack_page(label, page_label)
+        self.option_page_names.add(page_name)
+
+    def _add_stack_page(self, widget: Gtk.Widget, label: str) -> tuple[str, int]:
+        page_index = self.view_stack.get_n_pages()
+        page_name = "page-%d" % (page_index + 1)
+        self.view_stack.add_titled(widget, page_name, label)
+        return page_name, page_index
 
     def build_header_bar(self) -> None:
         self.search_entry = Gtk.SearchEntry(width_chars=30, placeholder_text=_("Search options"))
         self.search_entry.connect("search-changed", self.on_search_entry_changed)
-        self.search_entry.show_all()
 
-        # Advanced settings toggle
-        switch_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5, no_show_all=True, visible=True)
+        switch_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5, visible=True)
         switch_box.set_tooltip_text(_("Show advanced options"))
 
-        switch_label = Gtk.Label(label=_("Advanced"), no_show_all=True, visible=True)
-        switch = Gtk.Switch(no_show_all=True, visible=True, valign=Gtk.Align.CENTER)
+        switch_label = Gtk.Label(label=_("Advanced"), visible=True)
+        switch = Gtk.Switch(visible=True, valign=Gtk.Align.CENTER)
         switch.set_state(settings.read_setting("show_advanced_options") == "True")
         switch.connect("state-set", lambda _w, s: self.on_show_advanced_options_toggled(bool(s)))
 
-        switch_box.pack_start(switch_label, False, False, 0)
-        switch_box.pack_end(switch, False, False, 0)
+        switch_box.append(switch_label)
+        switch_box.append(switch)
 
         header_bar = self.get_header_bar()
-
         header_bar.pack_end(switch_box)
 
-        # These lists need to be distinct, so they can be separately
-        # hidden or shown without interfering with each other.
         self.advanced_switch_widgets = [switch_label, switch]
         self.header_bar_widgets = [self.cancel_button, self.save_button, switch_box]
 
-        if self.notebook:
-            self.update_advanced_switch_visibility(self.notebook.get_current_page())
+        if self.view_stack:
+            page_name = self.view_stack.get_visible_child_name()
+            if page_name:
+                self.update_advanced_switch_visibility(page_name)
 
     def on_search_entry_changed(self, entry: Gtk.Entry) -> None:
-        """Callback for the search input keypresses"""
         text = entry.get_text().lower().strip()
         self._set_filter(text)
 
     def on_show_advanced_options_toggled(self, is_active: bool) -> None:
         settings.write_setting("show_advanced_options", is_active)
-
         self._set_advanced_options_visible(is_active)
 
     def _set_advanced_options_visible(self, value: bool) -> None:
-        """Change visibility of advanced options across all config tabs."""
         if self.info_box:
             self.info_box.advanced_visibility = value
-        self.system_box.advanced_visibility = value
+        if self.system_box:
+            self.system_box.advanced_visibility = value
         if self.runner_box:
             self.runner_box.advanced_visibility = value
         if self.game_box:
@@ -299,7 +313,6 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
             self.game_box.filter = value
 
     def on_runner_changed(self, widget: Gtk.ComboBox) -> None:
-        """Action called when runner drop down is changed."""
         new_runner_index = widget.get_active()
         game_info_box = self.info_box
         if game_info_box.runner_index and new_runner_index != game_info_box.runner_index:
@@ -318,14 +331,12 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
             if dlg.result == Gtk.ResponseType.YES:
                 self._switch_runner(widget, new_runner_index)
             else:
-                # Revert the dropdown menu to the previously selected runner
                 widget.set_active(game_info_box.runner_index)
         else:
             self._switch_runner(widget, new_runner_index)
 
     def _switch_runner(self, widget: Gtk.ComboBox, new_runner_index: int) -> None:
-        """Rebuilds the UI on runner change"""
-        current_page = self.notebook.get_current_page()
+        current_page_name = self.view_stack.get_visible_child_name()
         game_info_box = self.info_box
         game_info_box.runner_index = new_runner_index
         if new_runner_index == 0:
@@ -341,22 +352,26 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
             self.runner_name = runner_name
             self.lutris_config = LutrisConfig(runner_slug=self.runner_name, level="game")
         self._rebuild_tabs()
-        self.notebook.set_current_page(current_page)
+        if current_page_name:
+            self.view_stack.set_visible_child_name(current_page_name)
 
     def _rebuild_tabs(self) -> None:
-        """Rebuild notebook pages"""
-        for i in range(self.notebook.get_n_pages(), 1, -1):
-            self.notebook.remove_page(i - 1)
-        self.option_page_indices.clear()
-        self.searchable_page_indices.clear()
+        while self.view_stack.get_n_pages() > 1:
+            page = self.view_stack.get_nth_page(self.view_stack.get_n_pages() - 1)
+            self.view_stack.remove(page.get_child())
+
+        self.option_page_names = {name for name in self.option_page_names if name == "page-1"}
+        self.searchable_page_names.clear()
+        self.stack_page_generators.clear()
+        self.stack_page_updaters = {
+            name: updater for name, updater in self.stack_page_updaters.items() if name == "page-1"
+        }
         self._build_game_tab()
         self._build_runner_tab()
         self._build_system_tab()
-        self.show_all()
 
     def on_response(self, _widget: Gtk.Dialog, response: Gtk.ResponseType) -> None:
         if response in (Gtk.ResponseType.CANCEL, Gtk.ResponseType.DELETE_EVENT):
-            # Reload the config to clean out any changes we may have made
             if self.game:
                 self.game.reload_config()
         super().on_response(_widget, response)
@@ -401,7 +416,6 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         return True
 
     def on_save(self, _button: Gtk.Button) -> bool | None:
-        """Save game info and destroy widget."""
         if not self.is_valid():
             logger.warning(_("Current configuration is not valid, ignoring save request"))
             return None
@@ -437,7 +451,6 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         self.game.is_installed = True
         self.game.config = self.lutris_config
 
-        # Rename config file if game slug changed
         if new_config_id := rename_config(self.lutris_config.game_config_id, self.game.slug):
             self.game.game_config_id = new_config_id
 
@@ -449,7 +462,7 @@ class GameDialogCommon(SavableModelessDialog, DialogInstallUIDelegate):
         self.game.save()
         self.destroy()
         self.saved = True
-        return True  # stop signal propagation
+        return True
 
 
 class RunnerMessageBox(WidgetWarningMessageBox):

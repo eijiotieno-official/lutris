@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 from gettext import gettext as _
 from typing import TYPE_CHECKING, Any, Type, TypeVar, cast
 
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from lutris import settings
 from lutris.api import get_runners, parse_installer_url
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
     GtkWindowType = TypeVar("GtkWindowType", bound=Gtk.Window)
 
 
-class LutrisApplication(Gtk.Application):
+class LutrisApplication(Adw.Application):
     def __init__(self) -> None:
         super().__init__(
             application_id="net.lutris.Lutris",
@@ -338,7 +338,8 @@ class LutrisApplication(Gtk.Application):
 
     def do_startup(self) -> None:  # pylint: disable=arguments-differ
         """Sets up the application on first start."""
-        Gtk.Application.do_startup(self)
+        Adw.init()
+        Adw.Application.do_startup(self)
         file_handler.doRollover()
         signal.signal(signal.SIGINT, signal.SIG_DFL)
 
@@ -350,8 +351,10 @@ class LutrisApplication(Gtk.Application):
     def do_activate(self) -> None:  # pylint: disable=arguments-differ
         if not self.window:
             self.window = LutrisWindow(application=self)
-            screen = self.window.props.screen  # pylint: disable=no-member
-            Gtk.StyleContext.add_provider_for_screen(screen, self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            display = Gdk.Display.get_default()
+            Gtk.StyleContext.add_provider_for_display(
+                display, self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
 
     def start_runtime_updates(self) -> None:
         if os.environ.get("LUTRIS_SKIP_INIT"):
@@ -1117,7 +1120,7 @@ Also, check that the version specified is in the correct format.
             selected_category = "%s:%s" % self.window.selected_category
             settings.write_setting("selected_category", selected_category)
             self.window.destroy()
-        Gtk.Application.do_shutdown(self)
+        Adw.Application.do_shutdown(self)
 
     def set_tray_icon(self) -> None:
         """Creates or destroys a tray icon for the application"""

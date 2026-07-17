@@ -46,7 +46,7 @@ class Dialog(Gtk.Dialog):
     the response for you via 'response_type' or 'confirmed' and destory this
     dialog if it isn't NONE."""
 
-    vbox: Gtk.VBox
+    vbox: Gtk.Box
 
     def __init__(
         self,
@@ -709,6 +709,8 @@ class ClientLoginDialog(GtkBuilderDialog):
         cancel_button.connect("clicked", self.on_close)
         connect_button: Gtk.Button = self.builder.get_object("connect_button")
         connect_button.connect("clicked", self.on_connect)
+        self.username_entry.connect("activate", self.on_username_entry_activate)
+        self.password_entry.connect("activate", self.on_password_entry_activate)
 
     def get_credentials(self) -> tuple[str, str]:
         username = self.username_entry.get_text()

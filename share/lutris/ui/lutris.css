@@ -48,8 +48,8 @@
 }
 
 .info-frame {
-  color: @theme_text_color;
-  background-color: @theme_base_color;
+  color: @window_fg_color;
+  background-color: @view_bg_color;
 }
 
 .in-app-notification {

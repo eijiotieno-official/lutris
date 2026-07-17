@@ -31,8 +31,8 @@ class EditGameCategoriesDialog(SavableModelessDialog):
 
         self.vbox.set_homogeneous(False)
         self.vbox.set_spacing(10)
-        self.vbox.pack_start(self._create_category_checkboxes(), True, True, 0)
-        self.vbox.pack_start(self._create_add_category(), False, False, 0)
+        self.vbox.append(self._create_category_checkboxes())
+        self.vbox.append(self._create_add_category())
 
         if game:
             self.add_games([game])
@@ -93,7 +93,7 @@ class EditGameCategoriesDialog(SavableModelessDialog):
             self.category_checkboxes[category] = checkbutton
 
         scrolledwindow.add(self.checkbox_grid)
-        frame.add(scrolledwindow)
+        frame.set_child(scrolledwindow)
         return frame
 
     def _create_add_category(self):
@@ -112,12 +112,12 @@ class EditGameCategoriesDialog(SavableModelessDialog):
 
         category_entry = Gtk.Entry()
         category_entry.connect("activate", on_add_category)
-        hbox.pack_start(category_entry, True, True, 0)
+        hbox.append(category_entry)
 
         button = Gtk.Button.new_with_label(_("Add Category"))
         button.connect("clicked", on_add_category)
         button.set_tooltip_text(_("Adds the category to the list."))
-        hbox.pack_end(button, False, False, 0)
+        hbox.append(button)
 
         return hbox
 

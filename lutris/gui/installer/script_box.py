@@ -17,8 +17,8 @@ class InstallerScriptBox(Gtk.VBox):
         self.set_margin_left(12)
         self.set_margin_right(12)
         box = Gtk.Box(spacing=12, margin_top=6, margin_bottom=6)
-        box.pack_start(self.get_infobox(), True, True, 0)
-        box.add(self.get_install_button())
+        box.append(self.get_infobox())
+        box.append(self.get_install_button())
         self.add(box)
         self.add(self.get_revealer(revealed))
 
@@ -28,27 +28,27 @@ class InstallerScriptBox(Gtk.VBox):
 
     def get_infobox(self):
         """Return the central information box"""
-        info_box = Gtk.VBox(spacing=6)
-        title_box = Gtk.HBox(spacing=6)
+        info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         runner_label = InstallerLabel("%s" % self.script["runner"])
         runner_label.get_style_context().add_class("info-pill")
-        title_box.pack_start(runner_label, False, False, 0)
-        title_box.add(InstallerLabel("<b>%s</b>" % gtk_safe(self.script["version"]), selectable=True))
-        title_box.pack_start(InstallerLabel(""), True, True, 0)
+        title_box.append(runner_label)
+        title_box.append(InstallerLabel("<b>%s</b>" % gtk_safe(self.script["version"]), selectable=True))
+        title_box.append(InstallerLabel(""))
         rating_label = InstallerLabel(self.get_rating(), selectable=True)
         rating_label.set_alignment(1, 0.5)
-        title_box.pack_end(rating_label, False, False, 0)
-        info_box.add(title_box)
-        info_box.add(self.get_credits())
-        info_box.add(InstallerLabel(gtk_safe_urls(self.script["description"]), selectable=True))
+        title_box.append(rating_label)
+        info_box.append(title_box)
+        info_box.append(self.get_credits())
+        info_box.append(InstallerLabel(gtk_safe_urls(self.script["description"]), selectable=True))
 
         return info_box
 
     def get_revealer(self, revealed):
         """Return the revelaer widget"""
         self.revealer = Gtk.Revealer()
-        box = Gtk.VBox(visible=True)
-        box.add(self.get_notes())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=True)
+        box.append(self.get_notes())
 
         self.revealer.add(box)
         self.revealer.set_reveal_child(revealed)
@@ -63,7 +63,7 @@ class InstallerScriptBox(Gtk.VBox):
         install_button.connect("clicked", self.on_install_clicked)
         style_context = install_button.get_style_context()
         style_context.add_class("suggested-action")
-        align.add(install_button)
+        align.append(install_button)
         return align
 
     def get_notes(self):

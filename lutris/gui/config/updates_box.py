@@ -27,10 +27,10 @@ class UpdatesBox(BaseConfigBox):
             default=True,
             extra_widget=self.update_runtime_box,
         )
-        self.pack_start(self._get_framed_options_list_box([update_runtime_box]), False, False, 0)
+        self.append(self._get_framed_options_group([update_runtime_box]))
         self.add(self.get_section_label(_("Media updates")))
         self.update_media_box = UpdateButtonBox("", _("Download Missing Media"), clicked=self.on_download_media_clicked)
-        self.pack_start(self._get_framed_options_list_box([self.update_media_box]), False, False, 0)
+        self.append(self._get_framed_options_group([self.update_media_box]))
 
     def _get_radio_button(
         self, label_markup: str, active: bool, group: Gtk.RadioButton, margin: int = 12
@@ -118,7 +118,7 @@ class UpdatesBox(BaseConfigBox):
             if started:
                 update_box.show_running_markup(_("<i>Checking for updates...</i>"))
             else:
-                NoticeDialog(_("Updates are already being downloaded and installed."), parent=self.get_toplevel())
+                NoticeDialog(_("Updates are already being downloaded and installed."), parent=self.get_root())
         else:
             update_box.show_completion_markup("", _("No updates are required at this time."))
 
@@ -132,35 +132,36 @@ class UpdateButtonBox(Gtk.Box):
 
         self.label = Gtk.Label(visible=True, xalign=0)
         self.label.set_markup(label)
-        self.pack_start(self.label, True, True, 0)
+        self.label.set_hexpand(True)
+        self.append(self.label)
 
         self.button = Gtk.Button(label=button_label, visible=True)
         self.button.connect("clicked", clicked)
-        self.pack_end(self.button, False, False, 0)
+        self.append(self.button)
 
         self.spinner = Gtk.Spinner()
-        self.pack_end(self.spinner, False, False, 0)
+        self.append(self.spinner)
         self.result_label = Gtk.Label(wrap=True)
-        self.pack_end(self.result_label, False, False, 0)
+        self.append(self.result_label)
 
     def show_running_markup(self, markup: str) -> None:
-        self.button.hide()
+        self.button.set_visible(False)
         self.result_label.set_markup(markup)
-        self.result_label.show()
-        self.spinner.show()
+        self.result_label.set_visible(True)
+        self.spinner.set_visible(True)
         self.spinner.start()
 
     def show_completion_markup(self, label_markup: str, completion_markup: str) -> None:
-        self.button.hide()
-        self.result_label.show()
+        self.button.set_visible(False)
+        self.result_label.set_visible(True)
         self.spinner.stop()
-        self.spinner.hide()
+        self.spinner.set_visible(False)
         self.label.set_markup(label_markup)
         self.result_label.set_markup(completion_markup)
 
     def show_error(self, error: Exception) -> None:
-        self.button.hide()
-        self.result_label.show()
+        self.button.set_visible(False)
+        self.result_label.set_visible(True)
         self.spinner.stop()
-        self.spinner.hide()
+        self.spinner.set_visible(False)
         self.result_label.set_markup("<b>Error:</b>%s" % gtk_safe(str(error)))

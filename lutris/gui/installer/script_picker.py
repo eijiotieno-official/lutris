@@ -15,13 +15,13 @@ class InstallerPicker(Gtk.ListBox):
             self.add(InstallerScriptBox(script, parent=self, revealed=revealed))
             revealed = False  # Only reveal the first installer.
         self.connect("row-selected", self.on_activate)
-        self.show_all()
+        
 
     @staticmethod
     def on_activate(widget, row):
         """Handler for hiding and showing the revealers in children"""
         for script_box_row in widget:
-            script_box = script_box_row.get_children()[0]
+            script_box = script_box_row.get_first_child()
             script_box.reveal(False)
-        installer_row = row.get_children()[0]
+        installer_row = row.get_first_child()
         installer_row.reveal()

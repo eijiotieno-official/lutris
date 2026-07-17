@@ -1,4 +1,4 @@
-from gi.repository import Gio, GLib, GObject, Gtk
+from gi.repository import Adw, Gio, GLib, GObject
 
 from lutris import settings
 from lutris.gui.widgets import NotificationSource
@@ -9,6 +9,12 @@ PORTAL_OBJECT_PATH = "/org/freedesktop/portal/desktop"
 PORTAL_SETTINGS_INTERFACE = "org.freedesktop.portal.Settings"
 
 THEME_CHANGED = NotificationSource()
+
+_COLOR_SCHEMES = {
+    "light": Adw.ColorScheme.FORCE_LIGHT,
+    "dark": Adw.ColorScheme.FORCE_DARK,
+    "default": Adw.ColorScheme.DEFAULT,
+}
 
 
 class StyleManager(GObject.Object):
@@ -23,11 +29,13 @@ class StyleManager(GObject.Object):
     _preferred_theme = "default"
     _system_theme = None
     _is_dark = False
+    _is_config_dark = False
 
     def __init__(self):
         super().__init__()
 
-        self.gtksettings = Gtk.Settings.get_default()
+        self._style_manager = Adw.StyleManager.get_default()
+        self._style_manager.connect("notify::dark", self._on_style_dark_changed)
         self.preferred_theme = settings.read_setting("preferred_theme") or "default"
 
         Gio.DBusProxy.new_for_bus(
@@ -40,6 +48,9 @@ class StyleManager(GObject.Object):
             None,
             self._new_for_bus_cb,
         )
+
+    def _on_style_dark_changed(self, *_args):
+        self._sync_is_dark()
 
     def _read_portal_setting(self) -> None:
         if not self._dbus_proxy:
@@ -142,20 +153,22 @@ class StyleManager(GObject.Object):
     def is_dark(self) -> bool:
         return self._is_dark
 
-    def _update_is_dark(self) -> None:
-        if self.is_dark_by_default:
-            is_dark = self.preferred_theme != "light"
-        else:
-            is_dark = self.preferred_theme == "dark"
+    def _apply_color_scheme(self) -> None:
+        self._style_manager.set_color_scheme(_COLOR_SCHEMES.get(self._preferred_theme, Adw.ColorScheme.DEFAULT))
+
+    def _sync_is_dark(self) -> None:
+        is_dark = self._style_manager.get_dark()
 
         if self._is_dark == is_dark:
             return
 
         self._is_dark = is_dark
         self.notify("is-dark")
-
-        self.gtksettings.set_property("gtk-application-prefer-dark-theme", is_dark)
         THEME_CHANGED.fire()
+
+    def _update_is_dark(self) -> None:
+        self._apply_color_scheme()
+        self._sync_is_dark()
 
     @property
     def is_dark_by_default(self):

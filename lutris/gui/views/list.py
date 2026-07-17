@@ -1,21 +1,16 @@
-"""TreeView based game list"""
+"""ColumnView based game list"""
 
 from gettext import gettext as _
 
-# Third Party Libraries
 # pylint: disable=no-member
 from gi.repository import Gdk, Gtk, Pango
 
-# Lutris Modules
 from lutris import settings
 from lutris.gui.views import (
-    COL_ID,
-    COL_INSTALLED,
     COL_INSTALLED_AT,
     COL_INSTALLED_AT_TEXT,
     COL_LASTPLAYED,
     COL_LASTPLAYED_TEXT,
-    COL_MEDIA_PATHS,
     COL_NAME,
     COL_PLATFORM,
     COL_PLAYTIME,
@@ -26,114 +21,186 @@ from lutris.gui.views import (
     COLUMN_NAMES,
 )
 from lutris.gui.views.base import GameView
-from lutris.gui.widgets.cellrenderers import GridViewCellRendererImage
+from lutris.gui.views.game_item import GameItem, get_column_value
+from lutris.gui.views.store import compare_game_items
+from lutris.gui.widgets.game_grid_cell import GameListMediaCell, GameMediaPresentation
 
 
-class GameListView(Gtk.TreeView, GameView):  # type:ignore[misc]
+class GameListView(Gtk.ColumnView, GameView):
     """Show the main list of games."""
 
     __gsignals__ = GameView.__gsignals__
 
     def __init__(self, store):
-        Gtk.TreeView.__init__(self)
+        super().__init__()
         GameView.__init__(self)
 
-        self.set_rules_hint(True)
+        self._selection_model = None
+        self._selection_handler_id = None
+        self._columns: list[Gtk.ColumnViewColumn] = []
+        self.presentation = GameMediaPresentation()
+        self.image_renderer = self.presentation
+        self.media_column = None
 
-        # Image column
+        self.set_show_row_separators(True)
+        self.set_reorderable(True)
+
         if settings.SHOW_MEDIA:
-            self.image_renderer = GridViewCellRendererImage()
-            self.media_column = Gtk.TreeViewColumn(
-                "", self.image_renderer, media_paths=COL_MEDIA_PATHS, is_installed=COL_INSTALLED, game_id=COL_ID
-            )
-            self.media_column.set_reorderable(True)
-            self.media_column.set_sort_indicator(False)
-            self.media_column.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
-            self.append_column(self.media_column)
-        else:
-            self.image_renderer = None
-            self.media_column = None
+            self.media_column = self._add_media_column()
+
+        self._add_text_column(_("Name"), COL_NAME, 200, always_visible=True, sort_id=COL_SORTNAME)
+        self._add_text_column(_("Year"), COL_YEAR, 60)
+        self._add_text_column(_("Runner"), COL_RUNNER_HUMAN_NAME, 120)
+        self._add_text_column(_("Platform"), COL_PLATFORM, 120)
+        self._add_text_column(_("Last Played"), COL_LASTPLAYED_TEXT, 120, sort_id=COL_LASTPLAYED)
+        self._add_text_column(_("Play Time"), COL_PLAYTIME_TEXT, 100, sort_id=COL_PLAYTIME)
+        self._add_text_column(_("Installed At"), COL_INSTALLED_AT_TEXT, 120, sort_id=COL_INSTALLED_AT)
+
+        header_gesture = Gtk.GestureClick()
+        header_gesture.set_button(Gdk.BUTTON_SECONDARY)
+        header_gesture.connect("pressed", self._on_header_button_pressed)
+        self.add_controller(header_gesture)
 
         self.set_game_store(store)
 
-        # Text columns
-        default_text_cell = self.set_text_cell()
-        name_cell = self.set_text_cell()
-        name_cell.set_padding(5, 0)
-
-        self.set_column(name_cell, _("Name"), COL_NAME, 200, always_visible=True, sort_id=COL_SORTNAME)
-        self.set_column(default_text_cell, _("Year"), COL_YEAR, 60)
-        self.set_column(default_text_cell, _("Runner"), COL_RUNNER_HUMAN_NAME, 120)
-        self.set_column(default_text_cell, _("Platform"), COL_PLATFORM, 120)
-        self.set_column(default_text_cell, _("Last Played"), COL_LASTPLAYED_TEXT, 120, sort_id=COL_LASTPLAYED)
-        self.set_column(default_text_cell, _("Play Time"), COL_PLAYTIME_TEXT, 100, sort_id=COL_PLAYTIME)
-        self.set_column(default_text_cell, _("Installed At"), COL_INSTALLED_AT_TEXT, 120, sort_id=COL_INSTALLED_AT)
-
-        self.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)
-
         self.connect_signals()
-        self.connect("row-activated", self.on_row_activated)
-        self.get_selection().connect("changed", self.on_cursor_changed)
+        self.connect("activate", self.on_row_activated)
 
     def set_game_store(self, game_store):
         super().set_game_store(game_store)
-
         self.model = game_store.store
-        self.set_model(self.model)
+        if self._selection_model and self._selection_handler_id:
+            self._selection_model.disconnect(self._selection_handler_id)
+        self._selection_model = Gtk.MultiSelection.new(self.model)
+        self.set_model(self._selection_model)
+        self._selection_handler_id = self._selection_model.connect("selection-changed", self._on_selection_changed)
 
         if self.media_column:
             size = game_store.service_media.size
-            media_width = size[0]
-            self.media_column.set_fixed_width(media_width)
+            self.media_column.set_fixed_width(size[0])
 
-    @staticmethod
-    def set_text_cell():
-        text_cell = Gtk.CellRendererText()
-        text_cell.set_padding(10, 0)
-        text_cell.set_property("ellipsize", Pango.EllipsizeMode.END)
-        return text_cell
+    def _make_text_factory(self, column_id):
+        factory = Gtk.SignalListItemFactory()
 
-    def set_column(self, cell, header, column_id, default_width, always_visible=False, sort_id=None):
-        column = Gtk.TreeViewColumn(header, cell, markup=column_id)
-        column.set_sort_indicator(True)
-        column.set_sort_column_id(column_id if sort_id is None else sort_id)
+        def on_setup(_factory, list_item):
+            label = Gtk.Label(xalign=0)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_margin_start(10)
+            label.set_margin_end(10)
+            list_item.set_child(label)
+
+        def on_bind(_factory, list_item):
+            item = list_item.get_item()
+            label = list_item.get_child()
+            if isinstance(item, GameItem) and isinstance(label, Gtk.Label):
+                label.set_markup(get_column_value(item, column_id))
+
+        factory.connect("setup", on_setup)
+        factory.connect("bind", on_bind)
+        return factory
+
+    def _make_media_factory(self):
+        factory = Gtk.SignalListItemFactory()
+
+        def on_setup(_factory, list_item):
+            list_item.set_child(GameListMediaCell(self.presentation))
+
+        def on_bind(_factory, list_item):
+            item = list_item.get_item()
+            cell = list_item.get_child()
+            if isinstance(item, GameItem) and isinstance(cell, GameListMediaCell):
+                cell.set_game_item(item)
+
+        factory.connect("setup", on_setup)
+        factory.connect("bind", on_bind)
+        return factory
+
+    def _make_column_sorter(self, sort_column: int):
+        def compare(item1, item2, _user_data):
+            return compare_game_items(item1, item2, sort_column)
+
+        return Gtk.CustomSorter.new(compare)
+
+    def _add_media_column(self):
+        column = Gtk.ColumnViewColumn(title="")
+        column.set_factory(self._make_media_factory())
         column.set_resizable(True)
-        column.set_reorderable(True)
-        width = settings.read_setting("%s_column_width" % COLUMN_NAMES[column_id], section="list view")
-        is_visible = settings.read_setting("%s_visible" % COLUMN_NAMES[column_id], section="list view")
+        column.set_sorter(None)
+        self.append_column(column)
+        self._columns.append(column)
+        return column
+
+    def _add_text_column(
+        self,
+        header,
+        column_id,
+        default_width,
+        always_visible=False,
+        sort_id=None,
+    ):
+        column = Gtk.ColumnViewColumn(title=header)
+        column.set_factory(self._make_text_factory(column_id))
+        column.set_resizable(True)
+        column.set_expand(True)
+
+        sort_column = column_id if sort_id is None else sort_id
+        column.set_sorter(self._make_column_sorter(sort_column))
+
+        setting_key = COLUMN_NAMES[column_id]
+
+        width = settings.read_setting("%s_column_width" % setting_key, section="list view")
+        is_visible = settings.read_setting("%s_visible" % setting_key, section="list view")
         column.set_fixed_width(int(width) if width else default_width)
         column.set_visible(is_visible == "True" or always_visible if is_visible else True)
+
         self.append_column(column)
-        column.connect("notify::width", self.on_column_width_changed)
-        column.get_button().connect("button-press-event", self.on_column_header_button_pressed)
+        self._columns.append(column)
+        column.connect("notify::fixed-width", self.on_column_width_changed, column)
         return column
 
     def get_path_at(self, x, y):
-        path_at = self.get_path_at_pos(x, y)
-        if path_at is None:
-            return None
-        path, _col, _cx, _cy = path_at
-        return path
+        picked = self.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while picked and picked != self:
+            if isinstance(picked, Gtk.ListItem):
+                position = picked.get_position()
+                if position != Gtk.INVALID_LIST_POSITION:
+                    return Gtk.TreePath((position,))
+            picked = picked.get_parent()
+        return None
 
     def set_selected(self, paths, scroll_into_view=False):
-        selection = self.get_selection()
-        selection.unselect_all()
+        if not self._selection_model:
+            return
+        self._selection_model.unselect_all()
 
         for idx, path in enumerate(paths):
-            selection.select_path(path)
+            position = path.get_indices()[0]
+            mode = Gtk.SelectionMode.ADD if idx else Gtk.SelectionMode.DEFAULT
+            self._selection_model.select_item(position, mode)
             if scroll_into_view and idx == 0:
-                self.scroll_to_cell(path, None, False, 0.0, 0.0)
+                self.scroll_to(position, Gtk.ListScrollFlags.NONE, 0.0, 0.0)
 
     def get_selected(self):
         """Return list of all selected items"""
-        selection = self.get_selection().get_selected_rows()
-        if not selection:
+        if not self._selection_model:
             return None
-        return selection[1]
+        selection = self._selection_model.get_selection()
+        if selection.get_size() == 0:
+            return None
+        paths = []
+        position = 0
+        while True:
+            position = selection.get_nth(position)
+            if position == Gtk.INVALID_LIST_POSITION:
+                break
+            paths.append(Gtk.TreePath((position,)))
+            position += 1
+        return paths
 
     def get_game_id_for_path(self, path):
-        iterator = self.get_model().get_iter(path)
-        return self.get_model().get_value(iterator, COL_ID)
+        position = path.get_indices()[0]
+        item = self.model.get_item(position)
+        return item.id if item else None
 
     def get_path_for_game_id(self, game_id):
         if self.game_store:
@@ -145,25 +212,40 @@ class GameListView(Gtk.TreeView, GameView):  # type:ignore[misc]
         if row:
             self.set_cursor(row.path)
 
-    def on_column_header_button_pressed(self, button, event):
-        """Handles column header button press events"""
-        if event.button == Gdk.BUTTON_SECONDARY:
-            menu = GameListColumnToggleMenu(self.get_columns())
-            menu.popup_at_pointer(None)
-            return True
+    def select_path(self, path):
+        if self._selection_model:
+            self._selection_model.select_item(path.get_indices()[0], Gtk.SelectionMode.DEFAULT)
 
-    def on_row_activated(self, widget, line=None, column=None):
+    def set_cursor(self, path, column=None, start_editing=False):  # pylint: disable=unused-argument
+        self.set_selected([path], scroll_into_view=True)
+
+    def on_row_activated(self, _view, position):
         """Handles double clicks"""
-        selected_id = self.get_selected_game_id()
+        selected_id = self.get_game_id_for_path(Gtk.TreePath((position,)))
         if selected_id:
             self.emit("game-activated", selected_id)
 
-    def on_cursor_changed(self, widget, _line=None, _column=None):
-        selected_items = self.get_selected()
-        self.emit("game-selected", selected_items)
+    def _on_selection_changed(self, *_args):
+        self.emit("game-selected", self.get_selected())
+
+    def _on_header_button_pressed(self, gesture, _n_press, x, y):
+        if gesture.get_current_button() != Gdk.BUTTON_SECONDARY:
+            return
+        if self.get_path_at(x, y) is not None:
+            return
+        menu = GameListColumnToggleMenu(self._columns)
+        menu.set_parent(self)
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        menu.set_pointing_to(rect)
+        menu.popup()
 
     @staticmethod
-    def on_column_width_changed(col, *args):
+    def on_column_width_changed(column, _pspec, user_data):
+        col = user_data or column
         col_name = col.get_title()
         if col_name:
             settings.write_setting(
@@ -172,32 +254,41 @@ class GameListView(Gtk.TreeView, GameView):  # type:ignore[misc]
                 "list view",
             )
 
+    def get_toplevel(self):
+        return self.get_root()
 
-class GameListColumnToggleMenu(Gtk.Menu):
+
+class GameListColumnToggleMenu(Gtk.Popover):
     def __init__(self, columns):
         super().__init__()
         self.columns = columns
         self.column_map = {}
-        self.create_menuitems()
-        self.show_all()
 
-    def create_menuitems(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(box)
+        self.create_menuitems(box)
+
+    def create_menuitems(self, box):
         for column in self.columns:
             title = column.get_title()
             if title == "":
                 continue
-            checkbox = Gtk.CheckMenuItem(title)
+            checkbox = Gtk.CheckButton(label=title)
             checkbox.set_active(column.get_visible())
+            checkbox.set_margin_start(12)
+            checkbox.set_margin_end(12)
+            checkbox.set_margin_top(6)
+            checkbox.set_margin_bottom(6)
             if title == _("Name"):
                 checkbox.set_sensitive(False)
             else:
                 checkbox.connect("toggled", self.on_toggle_column)
             self.column_map[checkbox] = column
-            self.append(checkbox)
+            box.append(checkbox)
 
-    def on_toggle_column(self, check_menu_item):
-        column = self.column_map[check_menu_item]
-        is_visible = check_menu_item.get_active()
+    def on_toggle_column(self, check_button):
+        column = self.column_map[check_button]
+        is_visible = check_button.get_active()
         column.set_visible(is_visible)
         settings.write_setting(
             column.get_title().replace(" ", "") + "_visible",

@@ -23,23 +23,6 @@ class TestGameDialog(TestCase):
         lutris_window = lutris_application.window
         self.dlg = AddGameDialog(lutris_window)
 
-    def get_notebook(self):
-        return self.dlg.vbox.get_children()[0]
-
-    def get_viewport(self, index):
-        children = self.get_notebook().get_children()
-        try:
-            scrolled_window = children[index]
-        except IndexError:
-            print("No viewport for index %s" % index)
-            print(children)
-            raise
-        viewport = scrolled_window.get_children()[0]
-        return viewport.get_children()[0]
-
-    def get_game_box(self):
-        return self.get_viewport(1)
-
     def test_dialog(self):
         self.assertEqual(self.dlg.notebook.get_current_page(), 0)
 

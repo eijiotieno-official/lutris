@@ -75,13 +75,11 @@ lutris/gui/views/list.py
 lutris/gui/views/media_loader.py
 lutris/gui/views/store_item.py
 lutris/gui/views/store.py
-lutris/gui/widgets/cellrenderers.py
 lutris/gui/widgets/common.py
 lutris/gui/widgets/contextual_menu.py
 lutris/gui/widgets/download_collection_progress_box.py
 lutris/gui/widgets/download_progress_box.py
 lutris/gui/widgets/game_bar.py
-lutris/gui/widgets/gi_composites.py
 lutris/gui/widgets/__init__.py
 lutris/gui/widgets/log_text_view.py
 lutris/gui/widgets/navigation_stack.py
