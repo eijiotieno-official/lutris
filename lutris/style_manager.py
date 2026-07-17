@@ -88,6 +88,11 @@ class StyleManager(GObject.Object):
                 self.system_theme = self._read_value(value)
             else:
                 raise RuntimeError("Could not read color-scheme")
+        except GLib.GError as ex:
+            if ex.matches(Gio.dbus_error_quark(), Gio.DBusError.UNKNOWN_METHOD):
+                logger.debug("Desktop portal does not provide color-scheme settings: %s", ex)
+            else:
+                logger.exception("Error reading color-scheme: %s", ex)
         except Exception as ex:
             logger.exception("Error reading color-scheme: %s", ex)
 
