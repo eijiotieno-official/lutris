@@ -33,7 +33,6 @@ class GameGridView(Gtk.GridView, GameView):
         self.set_factory(factory)
 
         self.set_enable_rubberband(True)
-        self.set_max_columns(0)
         self.set_single_click_activate(False)
         self.set_tab_behavior(Gtk.ListTabBehavior.ITEM)
 

@@ -61,7 +61,7 @@ from lutris.gui.widgets.game_bar import GameBar
 from lutris.gui.widgets.progress_box import ProgressBox, ProgressInfo
 from lutris.gui.widgets.sidebar import LutrisSidebar, SidebarRow
 from lutris.gui.widgets.stock_icon_image import StockIconImage
-from lutris.gui.widgets.utils import load_icon_theme, open_uri
+from lutris.gui.widgets.utils import MEDIA_CACHE_INVALIDATED, load_icon_theme, open_uri
 from lutris.runtime import ComponentUpdater, RuntimeUpdater
 from lutris.search import GameSearch
 from lutris.search_predicate import NotPredicate
@@ -106,7 +106,6 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
     login_notification_box: Gtk.Box = Gtk.Template.Child()
     version_notification_box: Gtk.Box = Gtk.Template.Child()
     show_hidden_games_button: Gtk.Button = Gtk.Template.Child()
-    header_bar: Gtk.HeaderBar = Gtk.Template.Child()
     left_header_box: Gtk.Box = Gtk.Template.Child()
     right_header_box: Gtk.Box = Gtk.Template.Child()
     game_view_box: Gtk.Box = Gtk.Template.Child()
@@ -168,7 +167,7 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         filter_button_image = StockIconImage(
             ["filter-symbolic", "edit-find-replace-symbolic"],
             fallback_name="system-search-symbolic",
-            icon_size=Gtk.IconSize.BUTTON,
+            pixel_size=16,
         )
         self.search_filters_button.set_child(filter_button_image)
         self.filter_box_search_name = ""
@@ -225,17 +224,22 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
     def _setup_adw_widgets(self) -> None:
         """Construct libadwaita widgets that cannot be declared in Gtk.Template."""
         self.split_view = Adw.OverlaySplitView(hexpand=True, vexpand=True)
+        self.sidebar_wrapper.unparent()
+        self.game_view_box.unparent()
         self.split_view.set_sidebar(self.sidebar_wrapper)
         self.split_view.set_content(self.game_view_box)
-        self._clear_box_children(self.split_container)
-        self.split_container.append(self.split_view)
 
         adw_header = Adw.HeaderBar()
         self.left_header_box.unparent()
         self.right_header_box.unparent()
         adw_header.pack_start(self.left_header_box)
         adw_header.pack_end(self.right_header_box)
-        self.set_titlebar(adw_header)
+
+        self.toolbar_view = Adw.ToolbarView()
+        self.toolbar_view.add_top_bar(adw_header)
+        self.toolbar_view.set_content(self.split_view)
+        self.split_container.unparent()
+        self.set_content(self.toolbar_view)
 
         self.login_banner = Adw.Banner(
             title=_("Login to Lutris to sync your game library"),
@@ -283,8 +287,8 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         key_controller.connect("key-pressed", self.on_key_pressed)
         self.add_controller(key_controller)
 
-        drop_target = Gtk.DropTarget.new(GObject.TYPE_INVALID, Gdk.DragAction.COPY)
-        drop_target.set_gtypes([Gdk.FileList.__gtype__, Gio.File.__gtype__])
+        drop_target = Gtk.DropTarget.new(Gio.File.__gtype__, Gdk.DragAction.COPY)
+        drop_target.set_gtypes([Gio.File.__gtype__, Gdk.FileList.__gtype__])
         drop_target.connect("drop", self.on_drop)
         self.add_controller(drop_target)
 
@@ -1674,7 +1678,7 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             # Downloaded icons may have just landed in the icon theme search path;
             # force a rescan so StockIconImage's "changed" handler re-runs and
             # widgets showing fallbacks pick up the real icons.
-            Gtk.IconTheme.get_default().rescan_if_needed()
+            MEDIA_CACHE_INVALIDATED.fire()
             if completion_function is not None:
                 completion_function(result)
 

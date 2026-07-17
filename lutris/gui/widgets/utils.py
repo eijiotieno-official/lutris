@@ -27,6 +27,13 @@ BANNER_SIZE = (184, 69)
 MEDIA_CACHE_INVALIDATED = NotificationSource()
 
 
+def get_icon_theme(display: Gdk.Display | None = None) -> Gtk.IconTheme:
+    """Return the icon theme for a display (GTK4)."""
+    if display is None:
+        display = Gdk.Display.get_default()
+    return Gtk.IconTheme.get_for_display(display)
+
+
 def get_application() -> "LutrisApplication | None":
     return cast("LutrisApplication", Gio.Application.get_default())
 
@@ -226,7 +233,7 @@ def has_stock_icon(name: str) -> bool:
     if not name:
         return False
 
-    theme = Gtk.IconTheme.get_default()
+    theme = get_icon_theme()
     return theme.has_icon(name)
 
 
@@ -337,7 +344,7 @@ def paste_overlay(base_image: "Image.Image", overlay_image: "Image.Image", posit
 
 def load_icon_theme() -> None:
     """Add the lutris icon folder to the default theme"""
-    icon_theme = Gtk.IconTheme.get_default()
+    icon_theme = get_icon_theme()
     local_theme_path = os.path.join(settings.RUNTIME_DIR, "icons")
     if local_theme_path not in icon_theme.get_search_path():
-        icon_theme.prepend_search_path(local_theme_path)
+        icon_theme.set_search_path([local_theme_path, *icon_theme.get_search_path()])

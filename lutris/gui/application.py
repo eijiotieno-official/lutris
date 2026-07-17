@@ -346,7 +346,7 @@ class LutrisApplication(Adw.Application):
         action = Gio.SimpleAction.new("quit")
         action.connect("activate", lambda *x: self.quit())
         self.add_action(action)
-        self.add_accelerator("<Primary>q", "app.quit")
+        self.set_accels_for_action("app.quit", ["<Primary>q"])
 
     def do_activate(self) -> None:  # pylint: disable=arguments-differ
         if not self.window:

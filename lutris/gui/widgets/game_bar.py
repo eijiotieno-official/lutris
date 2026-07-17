@@ -160,7 +160,8 @@ class GameBar(Gtk.Box):
         if not self.game.has_runner:
             return Gtk.Box()
         icon_name = self.game.runner.name + "-symbolic"
-        runner_icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        runner_icon = Gtk.Image.new_from_icon_name(icon_name)
+        runner_icon.set_pixel_size(16)
         runner_popover_buttons = self.get_runner_buttons()
         if runner_popover_buttons:
             runner_button = Gtk.Button()

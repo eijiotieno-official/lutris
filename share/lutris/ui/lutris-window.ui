@@ -16,6 +16,60 @@
     <property name="step-increment">1</property>
     <property name="page-increment">1</property>
   </object>
+  <object class="GtkBox" id="left_header_box">
+    <property name="spacing">6</property>
+    <child>
+      <object class="GtkButton">
+        <property name="focusable">True</property>
+        <property name="tooltip-text" translatable="yes">Add Game</property>
+        <property name="action-name">win.add-game</property>
+        <child>
+          <object class="GtkImage">
+            <property name="icon-name">list-add-symbolic</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkBox" id="right_header_box">
+    <property name="spacing">6</property>
+    <child>
+      <object class="GtkBox">
+        <child>
+          <object class="GtkButton">
+            <property name="focusable">True</property>
+            <property name="tooltip-text" translatable="yes">Toggle View</property>
+            <property name="action-name">win.toggle-viewtype</property>
+            <child>
+              <object class="GtkImage" id="viewtype_icon">
+                <property name="icon-name">view-list-symbolic</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkMenuButton" id="viewoptions_menubutton">
+            <property name="focusable">True</property>
+            <property name="popover">view_adjust_menu</property>
+          </object>
+        </child>
+        <style>
+          <class name="linked"/>
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuButton" id="mainoptions_menubutton">
+        <property name="focusable">True</property>
+        <property name="popover">view_menu_widget</property>
+        <child>
+          <object class="GtkImage">
+            <property name="icon-name">open-menu-symbolic</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
   <template class="LutrisWindow" parent="AdwApplicationWindow">
     <property name="title" translatable="yes">Lutris</property>
     <property name="icon-name">net.lutris.Lutris</property>
@@ -154,68 +208,6 @@
         </child>
       </object>
     </child>
-    <property name="titlebar">
-      <object class="GtkHeaderBar" id="header_bar">
-        <child type="start">
-          <object class="GtkBox" id="left_header_box">
-            <property name="spacing">6</property>
-            <child>
-              <object class="GtkButton">
-                <property name="focusable">True</property>
-                <property name="tooltip-text" translatable="yes">Add Game</property>
-                <property name="action-name">win.add-game</property>
-                <child>
-                  <object class="GtkImage">
-                    <property name="icon-name">list-add-symbolic</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-          </object>
-        </child>
-        <child type="end">
-          <object class="GtkBox" id="right_header_box">
-            <property name="spacing">6</property>
-            <child>
-              <object class="GtkBox">
-                <child>
-                  <object class="GtkButton">
-                    <property name="focusable">True</property>
-                    <property name="tooltip-text" translatable="yes">Toggle View</property>
-                    <property name="action-name">win.toggle-viewtype</property>
-                    <child>
-                      <object class="GtkImage" id="viewtype_icon">
-                        <property name="icon-name">view-list-symbolic</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkMenuButton" id="viewoptions_menubutton">
-                    <property name="focusable">True</property>
-                    <property name="popover">view_adjust_menu</property>
-                  </object>
-                </child>
-                <style>
-                  <class name="linked"/>
-                </style>
-              </object>
-            </child>
-            <child>
-              <object class="GtkMenuButton" id="mainoptions_menubutton">
-                <property name="focusable">True</property>
-                <property name="popover">view_menu_widget</property>
-                <child>
-                  <object class="GtkImage">
-                    <property name="icon-name">open-menu-symbolic</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-          </object>
-        </child>
-      </object>
-    </property>
   </template>
   <object class="GtkSizeGroup" id="size1">
     <property name="mode">both</property>

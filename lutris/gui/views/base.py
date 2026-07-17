@@ -39,7 +39,7 @@ class GameView:
         self.missing_games_updated_registration = MISSING_GAMES.updated.register(self.on_missing_games_updated)
         self.game_start_registration = GAME_START.register(self.on_game_start)
 
-        self.connect("root", self._on_root_changed)
+        self.connect("notify::root", self._on_root_changed)
 
         click_controller = Gtk.GestureClick()
         click_controller.set_button(Gdk.BUTTON_SECONDARY)
@@ -50,7 +50,7 @@ class GameView:
         key_controller.connect("key-pressed", self.handle_key_press)
         self.add_controller(key_controller)
 
-    def _on_root_changed(self, widget):
+    def _on_root_changed(self, widget, _pspec=None):
         if widget.get_root() is None:
             self.on_destroy(widget)
 

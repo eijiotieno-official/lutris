@@ -98,7 +98,7 @@ class SearchFiltersBox(Gtk.Box):
 
         if button_icon_names:
             button = Gtk.Button()
-            button.set_image(StockIconImage(button_icon_names, icon_size=Gtk.IconSize.BUTTON))
+            button.set_child(StockIconImage(button_icon_names, pixel_size=16))
             button.get_style_context().add_class("circular")
             if clicked:
                 button.connect("clicked", clicked)

@@ -371,7 +371,8 @@ class SidebarHeader(Gtk.ListBoxRow):
             label="<b>{}</b>".format(name),
         )
 
-        self.arrow = Gtk.Image.new_from_icon_name("pan-down-symbolic", Gtk.IconSize.MENU)
+        self.arrow = Gtk.Image.new_from_icon_name("pan-down-symbolic")
+        self.arrow.set_pixel_size(16)
         self.arrow.set_margin_end(6)
 
         box = Gtk.Box(margin_start=9, margin_top=6, margin_bottom=6, margin_end=9)
@@ -404,7 +405,8 @@ class SidebarHeader(Gtk.ListBoxRow):
         self._collapsed = value
         if self.collapsible:
             icon_name = "pan-end-symbolic" if value else "pan-down-symbolic"
-            self.arrow.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
+            self.arrow.set_from_icon_name(icon_name)
+            self.arrow.set_pixel_size(16)
 
     def _on_click(self, _gesture, _n_press, _x, _y) -> None:
         self.collapsed = not self.collapsed
@@ -554,7 +556,7 @@ class LutrisSidebar(Gtk.ListBox):
         """
 
         # Add the Library header first
-        self.add(self.row_headers["library"])
+        self.append(self.row_headers["library"])
 
         # Create the basic rows that are not data dependant
 
@@ -564,9 +566,9 @@ class LutrisSidebar(Gtk.ListBox):
             _("Games"),
             self.get_sidebar_icon("applications-games-symbolic"),
         )
-        self.add(self.games_row)
+        self.append(self.games_row)
 
-        self.add(
+        self.append(
             SidebarRow(
                 "recent",
                 "dynamic_category",
@@ -575,7 +577,7 @@ class LutrisSidebar(Gtk.ListBox):
             )
         )
 
-        self.add(
+        self.append(
             SidebarRow(
                 "favorite",
                 "category",
@@ -584,7 +586,7 @@ class LutrisSidebar(Gtk.ListBox):
             )
         )
 
-        self.add(
+        self.append(
             SidebarRow(
                 ".uncategorized",
                 "dynamic_category",
@@ -599,7 +601,7 @@ class LutrisSidebar(Gtk.ListBox):
             _("Hidden"),
             self.get_sidebar_icon("action-unavailable-symbolic"),
         )
-        self.add(self.hidden_row)
+        self.append(self.hidden_row)
 
         self.missing_row = SidebarRow(
             "missing",
@@ -607,7 +609,7 @@ class LutrisSidebar(Gtk.ListBox):
             _("Missing"),
             self.get_sidebar_icon("dialog-warning-symbolic"),
         )
-        self.add(self.missing_row)
+        self.append(self.missing_row)
 
         self.running_row = SidebarRow(
             "running",
@@ -616,7 +618,7 @@ class LutrisSidebar(Gtk.ListBox):
             self.get_sidebar_icon("media-playback-start-symbolic"),
         )
         # I wanted this to be on top but it really messes with the headers when showing/hiding the row.
-        self.add(self.running_row)
+        self.append(self.running_row)
         self.hidden_row.set_visible(False)
         self.missing_row.set_visible(False)
         self.running_row.set_visible(False)

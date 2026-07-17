@@ -648,12 +648,7 @@ class AddGamesWindow(ModelessDialog):  # pylint: disable=too-many-public-methods
     # Implementation
 
     def _get_icon(self, name, small=False):
-        if small:
-            size = Gtk.IconSize.MENU
-            pixel_size = 16
-        else:
-            size = Gtk.IconSize.DND
-            pixel_size = 32
+        pixel_size = 16 if small else 32
 
         # Check if it's a media file reference (e.g., "media:playtron")
         if name.startswith("media:"):
@@ -672,7 +667,8 @@ class AddGamesWindow(ModelessDialog):  # pylint: disable=too-many-public-methods
                 icon.set_visible(True)
                 return icon
 
-        icon = Gtk.Image.new_from_icon_name(name, size)
+        icon = Gtk.Image.new_from_icon_name(name)
+        icon.set_pixel_size(pixel_size)
         icon.set_visible(True)
         return icon
 

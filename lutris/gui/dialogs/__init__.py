@@ -31,7 +31,7 @@ def _run_adw_message_dialog(dialog: Adw.MessageDialog) -> str:
     result: list[str | None] = [None]
     loop = GLib.MainLoop()
 
-    def on_chosen(_dialog: Adw.MessageDialog, async_result: GLib.AsyncResult) -> None:
+    def on_chosen(_dialog: Adw.MessageDialog, async_result) -> None:
         result[0] = dialog.choose_finish(async_result)
         loop.quit()
 
