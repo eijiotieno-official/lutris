@@ -30,9 +30,10 @@ class LogWindow(GObject.Object):
 
         self.buffer = buffer
         self.logtextview = LogTextView(self.buffer)
+        self._font_size = self._get_current_font_size()
 
         scrolled_window: Gtk.ScrolledWindow = builder.get_object("scrolled_window")
-        scrolled_window.add(self.logtextview)
+        scrolled_window.set_child(self.logtextview)
 
         self.search_entry: Gtk.SearchEntry = builder.get_object("search_entry")
         self.search_entry.connect("search-changed", self.logtextview.find_first)
@@ -49,7 +50,24 @@ class LogWindow(GObject.Object):
         zoom_out_button.connect("clicked", self.on_zoom_out_clicked)
 
         self.window.connect("key-press-event", self.on_key_press_event)
-        self.window.show_all()
+        self.window.present()
+
+    def _get_current_font_size(self) -> float:
+        context = self.logtextview.get_pango_context()
+        font_desc = context.get_font_description()
+        return font_desc.get_size() / Pango.SCALE
+
+    def _apply_font_size(self) -> None:
+        tag_table = self.buffer.get_tag_table()
+        tag = tag_table.lookup("log-font")
+        if not tag:
+            tag = self.buffer.create_tag("log-font")
+        tag.set_property("font", Pango.FontDescription.from_string(f"monospace {int(self._font_size)}"))
+        self.buffer.apply_tag(
+            tag,
+            self.buffer.get_start_iter(),
+            self.buffer.get_end_iter(),
+        )
 
     def on_key_press_event(self, widget: Gtk.ApplicationWindow, event: Gdk.EventKey) -> None:
         shift = event.state & Gdk.ModifierType.SHIFT_MASK
@@ -76,14 +94,12 @@ class LogWindow(GObject.Object):
 
     def on_zoom_in_clicked(self, _button: Gtk.Button) -> None:
         """Increase font size"""
-        font = self.logtextview.get_style_context().get_font(Gtk.StateFlags.NORMAL)
-        size = font.get_size() / Pango.SCALE
-        if size < 48:  # Maximum size
-            self.logtextview.override_font(Pango.FontDescription.from_string(f"monospace {size + 1}"))
+        if self._font_size < 48:
+            self._font_size += 1
+            self._apply_font_size()
 
     def on_zoom_out_clicked(self, _button: Gtk.Button) -> None:
         """Decrease font size"""
-        font = self.logtextview.get_style_context().get_font(Gtk.StateFlags.NORMAL)
-        size = font.get_size() / Pango.SCALE
-        if size > 6:  # Minimum size
-            self.logtextview.override_font(Pango.FontDescription.from_string(f"monospace {size - 1}"))
+        if self._font_size > 6:
+            self._font_size -= 1
+            self._apply_font_size()

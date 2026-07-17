@@ -8,12 +8,12 @@ from collections.abc import Callable
 from gettext import gettext as _
 from typing import TYPE_CHECKING, Any, Dict, TypeVar, cast
 
-from gi.repository import Gdk, GObject, Gtk
+from gi.repository import Adw, Gdk, GLib, Gio, GObject, Gtk
 
 from lutris import api, settings
 from lutris.exceptions import LutrisError
 from lutris.gui.widgets.log_text_view import LogTextView
-from lutris.gui.widgets.utils import get_widget_children, get_widget_window
+from lutris.gui.widgets.utils import get_widget_window
 from lutris.util import datapath
 from lutris.util.jobs import schedule_at_idle
 from lutris.util.log import get_log_contents, logger
@@ -22,6 +22,22 @@ from lutris.util.strings import gtk_safe
 if TYPE_CHECKING:
     from lutris.config import LaunchConfigDict
     from lutris.game import Game
+
+_DIALOG_MODAL = getattr(Gtk.DialogFlags, "MODAL", 1) if hasattr(Gtk, "DialogFlags") else 1
+
+
+def _run_adw_message_dialog(dialog: Adw.MessageDialog) -> str:
+    """Run an Adw.MessageDialog synchronously for backward compatibility."""
+    result: list[str | None] = [None]
+    loop = GLib.MainLoop()
+
+    def on_chosen(_dialog: Adw.MessageDialog, async_result: GLib.AsyncResult) -> None:
+        result[0] = dialog.choose_finish(async_result)
+        loop.quit()
+
+    dialog.choose(None, on_chosen)
+    loop.run()
+    return result[0] or ""
 
 
 class Dialog(Gtk.Dialog):
@@ -36,14 +52,61 @@ class Dialog(Gtk.Dialog):
         self,
         title: str | None = None,
         parent: Gtk.Widget | None = None,
-        flags: Gtk.DialogFlags = 0,
+        flags: int = 0,
         buttons: Gtk.ButtonsType | None = None,
         **kwargs: Any,
     ):
-        # MyPy can't see it, but __init__ can handle the new_with_buttons arguments for us
-        super().__init__(title, parent, flags, buttons, **kwargs)  # type:ignore
+        use_header_bar = kwargs.pop("use_header_bar", None)
+        border_width = kwargs.pop("border_width", None)
+
+        init_kwargs: dict[str, Any] = {}
+        if title:
+            init_kwargs["title"] = title
+        if use_header_bar is not None:
+            init_kwargs["use_header_bar"] = use_header_bar
+
+        super().__init__(**init_kwargs, **kwargs)
+
+        parent_window = get_widget_window(parent)
+        if parent_window:
+            self.set_transient_for(parent_window)
+        if flags & _DIALOG_MODAL:
+            self.set_modal(True)
+
+        self.vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_child(self.vbox)
+
+        if border_width is not None:
+            self.vbox.set_margin_top(border_width)
+            self.vbox.set_margin_bottom(border_width)
+            self.vbox.set_margin_start(border_width)
+            self.vbox.set_margin_end(border_width)
+
         self._response_type = Gtk.ResponseType.NONE
+        self._run_loop: GLib.MainLoop | None = None
         self.connect("response", self.on_response)
+
+        if buttons is not None:
+            self._add_buttons_type(buttons)
+
+    def get_content_area(self) -> Gtk.Box:
+        return self.vbox
+
+    def run(self) -> Gtk.ResponseType:
+        self.present()
+        self._run_loop = GLib.MainLoop()
+        self._run_loop.run()
+        return self._response_type
+
+    def _add_buttons_type(self, buttons: Gtk.ButtonsType) -> None:
+        if buttons == Gtk.ButtonsType.OK:
+            self.add_button(_("_OK"), Gtk.ResponseType.OK)
+        elif buttons == Gtk.ButtonsType.OK_CANCEL:
+            self.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
+            self.add_button(_("_OK"), Gtk.ResponseType.OK)
+        elif buttons == Gtk.ButtonsType.YES_NO:
+            self.add_button(_("_No"), Gtk.ResponseType.NO)
+            self.add_button(_("_Yes"), Gtk.ResponseType.YES)
 
     @property
     def response_type(self) -> Gtk.ResponseType:
@@ -61,6 +124,8 @@ class Dialog(Gtk.Dialog):
         """Handles the dialog response; you can override this but by default
         this records the response for 'response_type'."""
         self._response_type = response
+        if self._run_loop and self._run_loop.is_running():
+            self._run_loop.quit()
 
     def destroy_at_idle(self, condition: Callable[[], bool] | None = None) -> None:
         """Adds as idle task to destroy this window at idle time;
@@ -84,8 +149,7 @@ class Dialog(Gtk.Dialog):
     def add_styled_button(self, button_text: str, response_id: Gtk.ResponseType, css_class: str) -> Gtk.Button:
         button: Gtk.Button = self.add_button(button_text, response_id)
         if css_class:
-            style_context = button.get_style_context()
-            style_context.add_class(css_class)
+            button.add_css_class(css_class)
         return button
 
     def add_default_button(
@@ -108,11 +172,11 @@ class ModalDialog(Dialog):
         self,
         title: str | None = None,
         parent: Gtk.Widget | None = None,
-        flags: Gtk.DialogFlags = 0,
+        flags: int = 0,
         buttons: Gtk.ButtonsType | None = None,
         **kwargs: Any,
     ):
-        super().__init__(title, parent, flags | Gtk.DialogFlags.MODAL, buttons, **kwargs)
+        super().__init__(title, parent, flags | _DIALOG_MODAL, buttons, **kwargs)
         self.set_destroy_with_parent(True)
 
     def on_response(self, dialog: Gtk.Dialog, response: Gtk.ResponseType) -> None:
@@ -135,14 +199,13 @@ class ModelessDialog(Dialog):
         self,
         title: str | None = None,
         parent: Gtk.Widget | None = None,
-        flags: Gtk.DialogFlags = 0,
+        flags: int = 0,
         buttons: Gtk.ButtonsType | None = None,
         **kwargs: Any,
     ):
         super().__init__(title, parent, flags, buttons, **kwargs)
         # These are not stuck above the 'main' window, but can be
         # re-ordered freely.
-        self.set_type_hint(Gdk.WindowTypeHint.NORMAL)
 
         # These are independent windows, but start centered over
         # a parent like a dialog. Not modal, not really transient,
@@ -179,10 +242,13 @@ class SavableModelessDialog(ModelessDialog):
         self.save_button.set_valign(Gtk.Align.CENTER)
         self.save_button.connect("clicked", self.on_save)
 
-        self.accelerators = Gtk.AccelGroup()
-        self.add_accel_group(self.accelerators)
-        key, mod = Gtk.accelerator_parse("<Primary>s")
-        self.save_button.add_accelerator("clicked", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
+        controller = Gtk.ShortcutController()
+        shortcut = Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("<Primary>s"),
+            Gtk.CallbackAction.new(lambda *_args: self.on_save() or True),
+        )
+        controller.add_shortcut(shortcut)
+        self.add_controller(controller)
 
     def on_save(self, _button: Gtk.Button) -> bool | None:
         pass
@@ -210,9 +276,9 @@ class GtkBuilderDialog(GObject.Object):
         self.builder.connect_signals(self)
         if parent:
             self.dialog.set_transient_for(parent)
-        self.dialog.show_all()
-        self.dialog.connect("delete-event", self.on_close)
+        self.dialog.connect("close-request", self.on_close)
         self.initialize(**kwargs)
+        self.dialog.present()
 
     def initialize(self, **kwargs: Any) -> None:
         """Implement further customizations in subclasses"""
@@ -220,10 +286,11 @@ class GtkBuilderDialog(GObject.Object):
     def present(self) -> None:
         self.dialog.present()
 
-    def on_close(self, *args: Any) -> None:
+    def on_close(self, *_args: Any) -> bool:
         """Propagate the destroy event after closing the dialog"""
         self.dialog.destroy()
         self.emit("destroy")
+        return False
 
     def on_response(self, _widget: Gtk.Dialog, response: Gtk.ResponseType) -> None:
         if response == Gtk.ResponseType.DELETE_EVENT:
@@ -242,44 +309,40 @@ class AboutDialog(GtkBuilderDialog):
         self.dialog.set_version(settings.VERSION)
 
 
-class NoticeDialog(Gtk.MessageDialog):
+class NoticeDialog:
     """Display a message to the user."""
 
     def __init__(self, message_markup: str, secondary: str | None = None, parent: Gtk.Widget | None = None):
-        parent: Gtk.Window = get_widget_window(parent)
-        super().__init__(message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.OK, parent=parent)
-        self.set_markup(message_markup)
+        dialog = Adw.MessageDialog(transient_for=get_widget_window(parent))
+        dialog.set_heading(message_markup[:256])
+        dialog.set_heading_use_markup(True)
         if secondary:
-            self.format_secondary_text(secondary[:256])
-
-        # So you can copy warning text
-        for child in get_widget_children(self.get_message_area(), child_type=Gtk.Label):
-            child.set_selectable(True)
-
-        self.run()  # type: ignore
-        self.destroy()
+            dialog.set_body(secondary[:256])
+        dialog.add_response("ok", _("_OK"))
+        dialog.set_default_response("ok")
+        dialog.set_close_response("ok")
+        _run_adw_message_dialog(dialog)
 
 
-class WarningDialog(Gtk.MessageDialog):
+class WarningDialog:
     """Display a warning to the user, who responds with whether to proceed, like
     a QuestionDialog."""
 
     def __init__(self, message_markup: str, secondary: str | None = None, parent: Gtk.Widget | None = None):
-        parent: Gtk.Window = get_widget_window(parent)
-        super().__init__(message_type=Gtk.MessageType.WARNING, buttons=Gtk.ButtonsType.OK_CANCEL, parent=parent)
-        self.set_markup(message_markup)
+        dialog = Adw.MessageDialog(transient_for=get_widget_window(parent))
+        dialog.set_heading(message_markup[:256])
+        dialog.set_heading_use_markup(True)
         if secondary:
-            self.format_secondary_text(secondary[:256])
+            dialog.set_body(secondary[:256])
+        dialog.add_response("cancel", _("_Cancel"))
+        dialog.add_response("ok", _("_OK"))
+        dialog.set_default_response("ok")
+        dialog.set_close_response("cancel")
+        response = _run_adw_message_dialog(dialog)
+        self.result = Gtk.ResponseType.OK if response == "ok" else Gtk.ResponseType.CANCEL
 
-        # So you can copy warning text
-        for child in get_widget_children(self.get_message_area(), child_type=Gtk.Label):
-            child.set_selectable(True)
 
-        self.result = self.run()  # type: ignore
-        self.destroy()
-
-
-class ErrorDialog(Gtk.MessageDialog):
+class ErrorDialog:
     """Display an error message."""
 
     def __init__(
@@ -289,9 +352,6 @@ class ErrorDialog(Gtk.MessageDialog):
         secondary_markup: str | None = None,
         parent: Gtk.Widget | None = None,
     ):
-        parent: Gtk.Window = get_widget_window(parent)
-        super().__init__(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.OK, parent=parent)
-
         def get_message_markup(err: BaseException | str) -> str:
             if isinstance(err, LutrisError):
                 return err.message_markup or gtk_safe(str(err))
@@ -300,9 +360,6 @@ class ErrorDialog(Gtk.MessageDialog):
 
         if isinstance(error, builtins.BaseException):
             if secondary_markup:
-                # Some errors contain < and > and look like markup, but aren't-
-                # we'll need to protect the message dialog against this. To use markup,
-                # you must pass the message itself directly.
                 message_markup = message_markup or get_message_markup(error)
             elif not message_markup:
                 message_markup = "<span weight='bold'>%s</span>" % _("Lutris has encountered an error")
@@ -310,47 +367,37 @@ class ErrorDialog(Gtk.MessageDialog):
         elif not message_markup:
             message_markup = get_message_markup(error)
 
-        # Gtk doesn't wrap long labels containing no space correctly
-        # the length of the message is limited to avoid display issues
-
+        dialog = Adw.MessageDialog(transient_for=get_widget_window(parent))
         if message_markup:
-            self.set_markup(message_markup[:256])
-
+            dialog.set_heading(message_markup[:256])
+            dialog.set_heading_use_markup(True)
         if secondary_markup:
-            self.format_secondary_markup(secondary_markup[:256])
-
-        # So you can copy error text
-        for child in get_widget_children(self.get_message_area(), child_type=Gtk.Label):
-            child.set_selectable(True)
+            dialog.set_body(secondary_markup[:256])
+            dialog.set_body_use_markup(True)
 
         if isinstance(error, BaseException):
-            content_area = self.get_content_area()
-            spacing = content_area.get_spacing()
-            content_area.set_spacing(0)
+            extra_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            copy_button = Gtk.Button(label=_("Copy Details to Clipboard"))
+            copy_button.connect("clicked", self.on_copy_clicked, error, dialog)
+            extra_box.append(copy_button)
+            extra_box.append(self.get_details_expander(error))
+            dialog.set_extra_child(extra_box)
 
-            details_expander = self.get_details_expander(error)
-            details_expander.set_margin_top(spacing)
-            content_area.pack_end(details_expander, False, False, 0)
+        dialog.add_response("ok", _("_OK"))
+        dialog.set_default_response("ok")
+        dialog.set_close_response("ok")
+        _run_adw_message_dialog(dialog)
 
-            action_area = cast(Gtk.ButtonBox, self.get_action_area())
-            copy_button = Gtk.Button(label=_("Copy Details to Clipboard"), visible=True)
-            action_area.pack_start(copy_button, False, True, 0)
-            action_area.set_child_secondary(copy_button, True)
-            copy_button.connect("clicked", self.on_copy_clicked, error)
-
-        self.run()  # type: ignore
-        self.destroy()
-
-    def on_copy_clicked(self, _button: Gtk.Button, error: BaseException) -> None:
+    def on_copy_clicked(self, _button: Gtk.Button, error: BaseException, _dialog: Adw.MessageDialog) -> None:
         details = self.format_error(error)
-        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-        clipboard.set_text(details, -1)
+        clipboard = Gdk.Display.get_default().get_clipboard()
+        clipboard.set(details)
 
     def get_details_expander(self, error: BaseException) -> Gtk.Widget:
         details = self.format_error(error, include_message=False)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        label = Gtk.Label(xalign=0.0, wrap=True, margin_left=6, margin_right=6, margin_bottom=6)
+        label = Gtk.Label(xalign=0.0, wrap=True, margin_start=6, margin_end=6, margin_bottom=6)
         label.set_markup(
             _(
                 "You can get support from "
@@ -360,24 +407,23 @@ class ErrorDialog(Gtk.MessageDialog):
                 "use the 'Copy Details to Clipboard' button to get them."
             )
         )
-        box.pack_start(label, False, False, 0)
+        box.append(label)
 
         expander = Gtk.Expander.new(_("Error details"))
 
         details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        details_box.pack_start(Gtk.Separator(), False, False, 0)
+        details_box.append(Gtk.Separator())
 
         details_textview = Gtk.TextView(editable=False)
         details_textview.get_buffer().set_text(details)
 
         details_scrolledwindow = Gtk.ScrolledWindow(width_request=800, height_request=400)
-        details_scrolledwindow.add(details_textview)
-        details_box.pack_start(details_scrolledwindow, False, False, 0)
-        expander.add(details_box)
+        details_scrolledwindow.set_child(details_textview)
+        details_box.append(details_scrolledwindow)
+        expander.set_child(details_box)
 
-        box.pack_start(expander, True, True, 0)
-        box.show_all()
+        box.append(expander)
         return box
 
     @staticmethod
@@ -394,24 +440,32 @@ class ErrorDialog(Gtk.MessageDialog):
         return text
 
 
-class QuestionDialog(Gtk.MessageDialog):
+class QuestionDialog:
     """Ask the user a yes or no question."""
 
     YES = Gtk.ResponseType.YES
     NO = Gtk.ResponseType.NO
 
     def __init__(self, dialog_settings: Dict[str, Any]) -> None:
-        super().__init__(message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.YES_NO)
-        self.set_markup(dialog_settings["question"])
-        self.set_title(dialog_settings["title"])
+        dialog = Adw.MessageDialog()
+        dialog.set_heading(dialog_settings["question"])
+        dialog.set_heading_use_markup(True)
+        dialog.set_title(dialog_settings["title"])
         if "parent" in dialog_settings:
-            self.set_transient_for(dialog_settings["parent"])
+            parent_window = get_widget_window(dialog_settings["parent"])
+            if parent_window:
+                dialog.set_transient_for(parent_window)
         if "widgets" in dialog_settings:
-            message_area: Gtk.Box = self.get_message_area()
+            widget_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             for widget in dialog_settings["widgets"]:
-                message_area.add(widget)
-        self.result = self.run()  # type: ignore
-        self.destroy()
+                widget_box.append(widget)
+            dialog.set_extra_child(widget_box)
+        dialog.add_response("no", _("_No"))
+        dialog.add_response("yes", _("_Yes"))
+        dialog.set_default_response("yes")
+        dialog.set_close_response("no")
+        response = _run_adw_message_dialog(dialog)
+        self.result = Gtk.ResponseType.YES if response == "yes" else Gtk.ResponseType.NO
 
 
 class InputDialog(ModalDialog):
@@ -419,19 +473,21 @@ class InputDialog(ModalDialog):
 
     def __init__(self, dialog_settings: dict[str, Any]):
         super().__init__(parent=dialog_settings["parent"])
-        self.set_border_width(12)
         self.user_value = ""
-        self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
-        self.ok_button = self.add_default_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        self.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
+        self.ok_button = self.add_default_button(_("_OK"), Gtk.ResponseType.OK)
         self.set_default_response(Gtk.ResponseType.OK)
         self.ok_button.set_sensitive(False)
         self.set_title(dialog_settings["title"])
-        label = Gtk.Label(visible=True)
+        label = Gtk.Label()
         label.set_markup(dialog_settings["question"])
-        self.get_content_area().pack_start(label, True, True, 12)
-        self.entry = Gtk.Entry(visible=True, activates_default=True)
+        content = self.get_content_area()
+        label.set_margin_bottom(12)
+        content.append(label)
+        self.entry = Gtk.Entry(activates_default=True)
         self.entry.connect("changed", self.on_entry_changed)
-        self.get_content_area().pack_start(self.entry, True, True, 12)
+        self.entry.set_margin_bottom(12)
+        content.append(self.entry)
         self.entry.set_text(dialog_settings.get("initial_value") or "")
 
     def on_entry_changed(self, widget: Gtk.Entry) -> None:
@@ -468,12 +524,12 @@ class ComponentUpdateWaitDialog(ModalDialog):
             xalign=0,
             wrap=True,
         )
-        heading_row.pack_start(heading, True, True, 0)
+        heading_row.append(heading)
 
         spinner = Gtk.Spinner()
         spinner.start()
-        heading_row.pack_start(spinner, False, False, 0)
-        column.pack_start(heading_row, False, False, 0)
+        heading_row.append(spinner)
+        column.append(heading_row)
 
         detail = Gtk.Label(
             label="<small>%s</small>"
@@ -482,11 +538,10 @@ class ComponentUpdateWaitDialog(ModalDialog):
             xalign=0,
             wrap=True,
         )
-        detail.get_style_context().add_class("dim-label")
-        column.pack_start(detail, False, False, 0)
+        detail.add_css_class("dim-label")
+        column.append(detail)
 
-        content.pack_start(column, False, False, 0)
-        content.show_all()
+        content.append(column)
 
         self.add_button(_("Cancel"), Gtk.ResponseType.CANCEL)
         self.add_default_button(_("Launch Anyway"), Gtk.ResponseType.OK)
@@ -508,19 +563,22 @@ class DirectoryDialog:
 
     def __init__(self, message: str, default_path: str | None = None, parent: Gtk.Window | None = None):
         self.folder = None
-        dialog = Gtk.FileChooserNative.new(
-            message,
-            parent,
-            Gtk.FileChooserAction.SELECT_FOLDER,
-            _("_OK"),
-            _("_Cancel"),
-        )
+        dialog = Gtk.FileDialog(title=message)
         if default_path:
-            dialog.set_current_folder(default_path)
-        self.result = dialog.run()
-        if self.result == Gtk.ResponseType.ACCEPT:
-            self.folder = dialog.get_filename()
-        dialog.destroy()
+            dialog.set_initial_folder(Gio.File.new_for_path(default_path))
+
+        loop = GLib.MainLoop()
+
+        def on_select(_dialog: Gtk.FileDialog, result: GLib.AsyncResult) -> None:
+            try:
+                folder = _dialog.select_folder_finish(result)
+                self.folder = folder.get_path()
+            except GLib.GError:
+                pass
+            loop.quit()
+
+        dialog.select_folder(parent, None, on_select)
+        loop.run()
 
 
 class FileDialog:
@@ -536,25 +594,28 @@ class FileDialog:
         self.filename = None
         if not message:
             message = _("Please choose a file")
-        if mode == "save":
-            action = Gtk.FileChooserAction.SAVE
-        else:
-            action = Gtk.FileChooserAction.OPEN
-        dialog = Gtk.FileChooserNative.new(
-            message,
-            parent,
-            action,
-            _("_OK"),
-            _("_Cancel"),
-        )
+        dialog = Gtk.FileDialog(title=message)
         if default_path and os.path.exists(default_path):
-            dialog.set_current_folder(default_path)
-        dialog.set_local_only(False)
-        response = dialog.run()
-        if response == Gtk.ResponseType.ACCEPT:
-            self.filename = dialog.get_filename()
+            dialog.set_initial_folder(Gio.File.new_for_path(default_path))
 
-        dialog.destroy()
+        loop = GLib.MainLoop()
+
+        def on_finished(_dialog: Gtk.FileDialog, result: GLib.AsyncResult) -> None:
+            try:
+                if mode == "save":
+                    file = _dialog.save_finish(result)
+                else:
+                    file = _dialog.open_finish(result)
+                self.filename = file.get_path()
+            except GLib.GError:
+                pass
+            loop.quit()
+
+        if mode == "save":
+            dialog.save(parent, None, on_finished)
+        else:
+            dialog.open(parent, None, on_finished)
+        loop.run()
 
 
 class InstallOrPlayDialog(ModalDialog):
@@ -563,26 +624,27 @@ class InstallOrPlayDialog(ModalDialog):
         self.action = "play"
         self.action_confirmed = False
 
-        self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
-        self.add_default_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        self.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
+        self.add_default_button(_("_OK"), Gtk.ResponseType.OK)
 
         self.set_size_request(320, 120)
         vbox = Gtk.Box.new(Gtk.Orientation.VERTICAL, 6)
-        self.get_content_area().add(vbox)
-        play_button = Gtk.RadioButton.new_with_label_from_widget(None, _("Launch game"))
+        self.get_content_area().append(vbox)
+        play_button = Gtk.CheckButton(label=_("Launch game"))
+        play_button.set_active(True)
         play_button.connect("toggled", self.on_button_toggled, "play")
-        vbox.pack_start(play_button, False, False, 0)
-        install_button = Gtk.RadioButton.new_from_widget(play_button)
-        install_button.set_label(_("Install the game again"))
+        vbox.append(play_button)
+        install_button = Gtk.CheckButton(label=_("Install the game again"))
+        install_button.set_group(play_button)
         install_button.connect("toggled", self.on_button_toggled, "install")
-        vbox.pack_start(install_button, False, False, 0)
+        vbox.append(install_button)
 
-        self.show_all()
-        self.run()  # type: ignore
+        self.run()
 
-    def on_button_toggled(self, _button: Gtk.RadioButton, action: str) -> None:
-        logger.debug("Action set to %s", action)
-        self.action = action
+    def on_button_toggled(self, button: Gtk.CheckButton, action: str) -> None:
+        if button.get_active():
+            logger.debug("Action set to %s", action)
+            self.action = action
 
     def on_response(self, _widget: Gtk.Dialog, response: Gtk.ResponseType) -> None:
         if response == Gtk.ResponseType.CANCEL:
@@ -596,31 +658,33 @@ class LaunchConfigSelectDialog(ModalDialog):
         self.config_index = 0
         self.dont_show_again = False
 
-        self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
-        self.add_default_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        self.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
+        self.add_default_button(_("_OK"), Gtk.ResponseType.OK)
 
         self.set_size_request(320, 120)
         vbox = Gtk.Box.new(Gtk.Orientation.VERTICAL, 6)
-        self.get_content_area().add(vbox)
+        self.get_content_area().append(vbox)
 
-        primary_game_radio = Gtk.RadioButton.new_with_label_from_widget(None, game.name)
+        primary_game_radio = Gtk.CheckButton(label=game.name)
+        primary_game_radio.set_active(True)
         primary_game_radio.connect("toggled", self.on_button_toggled, 0)
-        vbox.pack_start(primary_game_radio, False, False, 0)
+        vbox.append(primary_game_radio)
         for i, config in enumerate(configs):
-            _button = Gtk.RadioButton.new_from_widget(primary_game_radio)
-            _button.set_label(config["name"])
+            _button = Gtk.CheckButton(label=config["name"])
+            _button.set_group(primary_game_radio)
             _button.connect("toggled", self.on_button_toggled, i + 1)
-            vbox.pack_start(_button, False, False, 0)
+            vbox.append(_button)
 
         dont_show_checkbutton = Gtk.CheckButton(label=_("Do not ask again for this game."))
+        dont_show_checkbutton.set_margin_top(6)
         dont_show_checkbutton.connect("toggled", self.on_dont_show_checkbutton_toggled)
-        vbox.pack_end(dont_show_checkbutton, False, False, 6)
+        vbox.append(dont_show_checkbutton)
 
-        self.show_all()
-        self.run()  # type: ignore
+        self.run()
 
-    def on_button_toggled(self, _button: Gtk.RadioButton, index: int) -> None:
-        self.config_index = index
+    def on_button_toggled(self, button: Gtk.CheckButton, index: int) -> None:
+        if button.get_active():
+            self.config_index = index
 
     def on_dont_show_checkbutton_toggled(self, _button: Gtk.CheckButton) -> None:
         self.dont_show_again = _button.get_active()
@@ -680,8 +744,10 @@ class InstallerSourceDialog(ModelessDialog):
         super().__init__(title=_("Install script for {}").format(name), parent=parent, border_width=0)
         self.set_default_size(800, 750)
 
-        ok_button = self.add_default_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
-        ok_button.set_border_width(10)
+        ok_button = self.add_default_button(_("_OK"), Gtk.ResponseType.OK)
+        ok_button.set_margin_end(10)
+        ok_button.set_margin_top(10)
+        ok_button.set_margin_bottom(10)
 
         self.scrolled_window = Gtk.ScrolledWindow()
         self.scrolled_window.set_hexpand(True)
@@ -692,24 +758,25 @@ class InstallerSourceDialog(ModelessDialog):
 
         source_box = LogTextView(source_buffer, autoscroll=False)
 
-        self.get_content_area().set_border_width(0)
-        self.get_content_area().add(self.scrolled_window)
-        self.scrolled_window.add(source_box)
-
-        self.show_all()
+        self.get_content_area().set_margin_start(0)
+        self.get_content_area().set_margin_end(0)
+        self.get_content_area().set_margin_top(0)
+        self.get_content_area().set_margin_bottom(0)
+        self.get_content_area().append(self.scrolled_window)
+        self.scrolled_window.set_child(source_box)
 
 
 class HumbleBundleCookiesDialog(ModalDialog):
     def __init__(self, parent: Gtk.Widget | None = None):
         super().__init__(_("Humble Bundle Cookie Authentication"), parent)
         self.cookies_content = None
-        self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
-        self.add_default_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        self.add_button(_("_Cancel"), Gtk.ResponseType.CANCEL)
+        self.add_default_button(_("_OK"), Gtk.ResponseType.OK)
 
         self.set_size_request(640, 512)
 
         vbox = Gtk.Box.new(Gtk.Orientation.VERTICAL, 6)
-        self.get_content_area().add(vbox)
+        self.get_content_area().append(vbox)
         label = Gtk.Label()
         label.set_markup(
             _(
@@ -729,17 +796,21 @@ class HumbleBundleCookiesDialog(ModalDialog):
                 "open a support ticket</a> to ask Humble Bundle to fix their configuration."
             )
         )
-        vbox.pack_start(label, False, False, 24)
+        label.set_margin_top(24)
+        label.set_margin_bottom(24)
+        vbox.append(label)
         self.textview = Gtk.TextView()
         self.textview.set_left_margin(12)
         self.textview.set_right_margin(12)
         scrolledwindow = Gtk.ScrolledWindow()
         scrolledwindow.set_hexpand(True)
         scrolledwindow.set_vexpand(True)
-        scrolledwindow.add(self.textview)
-        vbox.pack_start(scrolledwindow, True, True, 24)
-        self.show_all()
-        self.run()  # type: ignore
+        scrolledwindow.set_child(self.textview)
+        scrolledwindow.set_margin_start(24)
+        scrolledwindow.set_margin_end(24)
+        scrolledwindow.set_margin_bottom(24)
+        vbox.append(scrolledwindow)
+        self.run()
 
     def on_response(self, dialog: Gtk.Dialog, response: Gtk.ResponseType) -> None:
         if response == Gtk.ResponseType.CANCEL:
@@ -776,7 +847,7 @@ def display_error(error: BaseException, parent: Gtk.Widget) -> None:
     if isinstance(parent, Gtk.Window):
         handler(error, parent)
     else:
-        handler(error, cast(Gtk.Window, parent.get_toplevel()))
+        handler(error, cast(Gtk.Window, parent.get_root()))
 
 
 def register_error_handler(error_class: type[TError], handler: Callable[[TError, Gtk.Window], Any]) -> None:
