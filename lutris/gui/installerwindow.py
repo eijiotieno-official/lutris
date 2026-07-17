@@ -167,7 +167,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         self.installer_files_box.connect("files-ready", self.on_files_ready)
 
         self.log_buffer = Gtk.TextBuffer()
-        self.error_details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, no_show_all=True)
+        self.error_details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.error_details_buffer = Gtk.TextBuffer()
         self.error_reporter = self.load_error_page
 
@@ -179,7 +179,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
     def add_start_button(self, label, handler=None, tooltip=None, sensitive=True):
         button = Gtk.Button.new_with_mnemonic(label)
         button.set_sensitive(sensitive)
-        button.set_no_show_all(True)
+        button.set_visible(False)
         if tooltip:
             button.set_tooltip_text(tooltip)
         if handler:
@@ -193,7 +193,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         """Add a button to the action buttons box"""
         button = Gtk.Button.new_with_mnemonic(label)
         button.set_sensitive(sensitive)
-        button.set_no_show_all(True)
+        button.set_visible(False)
         if tooltip:
             button.set_tooltip_text(tooltip)
         if handler:
@@ -207,7 +207,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         """Add a button to the menu in the header bar"""
         button = Gtk.ModelButton(label, visible=True, xalign=0.0)
         button.set_sensitive(sensitive)
-        button.set_no_show_all(True)
+        button.set_visible(False)
         if tooltip:
             button.set_tooltip_text(tooltip)
         if handler:
@@ -786,7 +786,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         box.append(spinner)
 
         self.install_progress_bar = Gtk.ProgressBar()
-        self.install_progress_bar.set_no_show_all(True)
+        self.install_progress_bar.set_visible(False)
         self.install_progress_bar.set_size_request(400, -1)
         box.append(self.install_progress_bar)
 
@@ -990,7 +990,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         details_textview = Gtk.TextView(editable=False, buffer=self.error_details_buffer)
 
         scrolledwindow = Gtk.ScrolledWindow()
-        scrolledwindow.add(details_textview)
+        scrolledwindow.set_child(details_textview)
         frame.set_child(scrolledwindow)
         self.error_details_box.append(frame)
         error_box.append(self.error_details_box)

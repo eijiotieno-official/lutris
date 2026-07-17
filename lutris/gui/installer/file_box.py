@@ -14,28 +14,22 @@ from lutris.util.log import logger
 from lutris.util.strings import gtk_safe
 
 
-class InstallerFileBox(Gtk.VBox):
+class InstallerFileBox(Gtk.Box):
     """Container for an installer file downloader / selector"""
 
-    __gsignals__ = {
-        "file-available": (GObject.SIGNAL_RUN_FIRST, None, ()),
-        "file-ready": (GObject.SIGNAL_RUN_FIRST, None, ()),
-        "file-unready": (GObject.SIGNAL_RUN_FIRST, None, ()),
-    }
-
     def __init__(self, installer_file):
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.installer_file = installer_file
         self.cache_to_pga = self.installer_file.uses_pga_cache()
         self.started = False
         self.start_func = None
         self.stop_func = None
-        self.state_label = None  # Use this label to display status update
-        self.set_margin_left(12)
-        self.set_margin_right(12)
+        self.state_label = None
+        self.set_margin_start(12)
+        self.set_margin_end(12)
         self.provider = self.installer_file.default_provider
         self.file_provider_widget = None
-        self.add(self.get_widgets())
+        self.append(self.get_widgets())
 
     @property
     def is_ready(self):
@@ -114,19 +108,18 @@ class InstallerFileBox(Gtk.VBox):
         return combobox
 
     def replace_file_provider_widget(self):
-        """Replace the file provider label and the source button with the actual widget"""
-        self.file_provider_widget.destroy()
+        self.file_provider_widget.unparent()
         widget_box = self.get_first_child()
         if self.started:
             self.file_provider_widget = self.get_file_provider_widget()
-            # Also remove the the source button
-            for child in widget_box.get_children():
-                child.destroy()
+            child = widget_box.get_first_child()
+            while child:
+                next_child = child.get_next_sibling()
+                widget_box.remove(child)
+                child = next_child
         else:
             self.file_provider_widget = self.get_file_provider_label()
-        widget_box.append(self.file_provider_widget)
-        widget_box.reorder_child(self.file_provider_widget, 0)
-        widget_box.show_all()
+        widget_box.prepend(self.file_provider_widget)
 
     def on_source_changed(self, combobox):
         """Change the source to a new provider, emit a new state"""
@@ -156,7 +149,7 @@ class InstallerFileBox(Gtk.VBox):
             location_entry.set_visible(True)
             box.append(location_entry)
             if self.installer_file.is_user_pga_caching_allowed:
-                cache_option = Gtk.CheckButton(_("Cache file for future installations"))
+                cache_option = Gtk.CheckButton(label=_("Cache file for future installations"))
                 cache_option.set_active(self.cache_to_pga)
                 cache_option.connect("toggled", self.on_user_file_cached)
                 box.append(cache_option)

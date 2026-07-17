@@ -85,37 +85,52 @@ class AddGamesWindow(ModelessDialog):  # pylint: disable=too-many-public-methods
         self.page_title_label = Gtk.Label(visible=True)
         content_area.append(self.page_title_label)
 
-        self.accelerators = Gtk.AccelGroup()
-        self.add_accel_group(self.accelerators)
+        self.shortcut_controller = Gtk.ShortcutController()
+        self.add_controller(self.shortcut_controller)
 
         header_bar = self.get_header_bar()
 
-        self.back_button = Gtk.Button(_("Back"), no_show_all=True)
+        self.back_button = Gtk.Button(label=_("Back"), visible=False)
         self.back_button.connect("clicked", self.on_back_clicked)
         key, mod = Gtk.accelerator_parse("<Alt>Left")
-        self.back_button.add_accelerator("clicked", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
+        self.back_button.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.new_gtk_keyval(key, mod),
+                Gtk.CallbackAction.new(lambda *_a: self.on_back_clicked(self.back_button) or True),
+            )
+        )
         key, mod = Gtk.accelerator_parse("<Alt>Home")
-        self.accelerators.connect(key, mod, Gtk.AccelFlags.VISIBLE, self.on_navigate_home)
-        header_bar.append(self.back_button)
+        self.shortcut_controller.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.new_gtk_keyval(key, mod),
+                Gtk.CallbackAction.new(lambda *_a: self.on_navigate_home(None, None, None, None) or True),
+            )
+        )
+        header_bar.pack_start(self.back_button)
 
-        self.continue_button = Gtk.Button(_("_Continue"))
-        header_bar.append(self.continue_button)
+        self.continue_button = Gtk.Button(label=_("_Continue"), visible=False, use_underline=True)
+        header_bar.pack_end(self.continue_button)
         self.continue_handler = None
 
-        self.cancel_button = Gtk.Button(_("Cancel"))
+        self.cancel_button = Gtk.Button(label=_("Cancel"), use_underline=True)
         self.cancel_button.connect("clicked", self.on_cancel_clicked)
         key, mod = Gtk.accelerator_parse("Escape")
-        self.cancel_button.add_accelerator("clicked", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
-        header_bar.append(self.cancel_button)
-        header_bar.set_show_close_button(False)
+        self.cancel_button.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.new_gtk_keyval(key, mod),
+                Gtk.CallbackAction.new(lambda *_a: self.on_cancel_clicked(self.cancel_button) or True),
+            )
+        )
+        header_bar.pack_start(self.cancel_button)
+        header_bar.set_show_title_buttons(False)
 
         content_area.set_margin_top(18)
         content_area.set_margin_bottom(18)
-        content_area.set_margin_right(18)
-        content_area.set_margin_left(18)
+        content_area.set_margin_end(18)
+        content_area.set_margin_start(18)
         content_area.set_spacing(12)
 
-        self.stack = NavigationStack(self.back_button)
+        self.stack = NavigationStack(self.back_button, cancel_button=self.cancel_button)
         content_area.append(self.stack)
 
         # Pre-create some controls so they can be used in signal handlers

@@ -13,7 +13,7 @@ from typing import Any
 import requests
 
 # Third Party Libraries
-from gi.repository import GdkPixbuf, Gtk, Pango
+from gi.repository import GdkPixbuf, Gio, GLib, Gtk, Pango
 
 # Lutris Modules
 from lutris import settings
@@ -21,7 +21,7 @@ from lutris.game import Game
 from lutris.gui.config.boxes import AdvancedSettingsBox
 from lutris.gui.widgets.common import Label, NumberEntry, SlugEntry
 from lutris.gui.widgets.scaled_image import ScaledImage
-from lutris.gui.widgets.utils import MEDIA_CACHE_INVALIDATED, get_image_file_extension, open_uri
+from lutris.gui.widgets.utils import MEDIA_CACHE_INVALIDATED, get_image_file_extension, get_widget_window, open_uri
 from lutris.runners import get_installed
 from lutris.services.lutris import LutrisBanner, LutrisCoverart, LutrisIcon, download_lutris_media
 from lutris.services.service_media import resolve_media_path
@@ -460,23 +460,23 @@ class GameInfoBox(AdvancedSettingsBox):
             self.image_path_open_button[image_type].set_sensitive(bool(image_path))
 
     def on_custom_image_select(self, _widget, image_type):
-        dialog = Gtk.FileChooserNative.new(
-            _("Please choose a custom image"),
-            self.parent_widget,
-            Gtk.FileChooserAction.OPEN,
-            None,
-            None,
-        )
-
+        dialog = Gtk.FileDialog(title=_("Please choose a custom image"))
+        filters = Gio.ListStore.new(Gtk.FileFilter)
         image_filter = Gtk.FileFilter()
         image_filter.set_name(_("Images"))
         image_filter.add_pixbuf_formats()
-        dialog.add_filter(image_filter)
-        response = dialog.run()
-        if response == Gtk.ResponseType.ACCEPT:
-            image_path = dialog.get_filename()
-            self.save_custom_media(image_type, image_path)
-        dialog.destroy()
+        filters.append(image_filter)
+
+        def on_file_selected(_dlg, result):
+            try:
+                gfile = dialog.open_finish(result)
+            except GLib.Error:
+                return
+            if gfile:
+                self.save_custom_media(image_type, gfile.get_path())
+
+        dialog.set_filters(filters)
+        dialog.open(get_widget_window(self.parent_widget), None, on_file_selected)
 
     def on_custom_image_reset_clicked(self, _widget, image_type):
         self.refresh_image(image_type)
