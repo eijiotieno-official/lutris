@@ -35,21 +35,21 @@ class EditCategoryGamesDialog(SavableModelessDialog):
         name_label = Gtk.Label(_("Name"))
         self.name_entry = Gtk.Entry()
         self.name_entry.set_text(self.category)
-        name_box.pack_start(name_label, False, False, 0)
-        name_box.pack_start(self.name_entry, True, True, 0)
+        name_box.append(name_label)
+        name_box.append(self.name_entry)
 
-        self.vbox.pack_start(name_box, False, False, 0)
-        self.vbox.pack_start(self._create_games_checkboxes(), True, True, 0)
+        self.vbox.append(name_box)
+        self.vbox.append(self._create_games_checkboxes())
 
-        delete_button = self.add_styled_button(Gtk.STOCK_DELETE, Gtk.ResponseType.NONE, css_class="destructive-action")
+        delete_button = self.add_styled_button(_("Delete"), Gtk.ResponseType.NONE, css_class="destructive-action")
         delete_button.connect("clicked", self.on_delete_clicked)
 
-        self.show_all()
+        
 
     def _create_games_checkboxes(self):
         frame = Gtk.Frame()
         sw = Gtk.ScrolledWindow()
-        row = Gtk.VBox()
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         category_games_names = sorted([x.name for x in self.category_games.values()])
         for game in self.available_games:
             label = game.name
@@ -58,9 +58,9 @@ class EditCategoryGamesDialog(SavableModelessDialog):
                 checkbutton_option.set_active(True)
             self.grid.attach_next_to(checkbutton_option, None, Gtk.PositionType.BOTTOM, 3, 1)
 
-        row.pack_start(self.grid, True, True, 0)
+        row.append(self.grid)
         sw.add_with_viewport(row)
-        frame.add(sw)
+        frame.set_child(sw)
         return frame
 
     def on_delete_clicked(self, _button):

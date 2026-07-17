@@ -71,4 +71,7 @@ except ImportError as ex:
     sys.exit(1)
 
 app = LutrisApplication()
+app.register()
+if app.get_is_remote():
+    sys.stderr.write("Lutris is already running; forwarding request to the existing instance.\n")
 sys.exit(app.run(sys.argv))

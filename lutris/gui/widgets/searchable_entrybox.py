@@ -3,6 +3,7 @@
 from gi.repository import Gdk, GLib, GObject, Gtk
 
 from lutris.gui.dialogs import display_error
+from lutris.gui.widgets.utils import get_widget_window
 
 
 class SearchableEntrybox(Gtk.Box):
@@ -26,12 +27,19 @@ class SearchableEntrybox(Gtk.Box):
         self.completion.set_text_column(0)
         self.completion.set_match_func(self.search_store)
         self.entry.set_completion(self.completion)
-        self.popup_menu = Gtk.Menu()
+
+        self._popover = Gtk.Popover()
+        self._popover.set_parent(self.entry)
+        self._list_box = Gtk.ListBox()
+        self._list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._popover.set_child(self._list_box)
 
         self.entry.connect("changed", self.on_entrybox_change)
-        self.entry.connect("scroll-event", self._on_entrybox_scroll)
+        scroll_controller = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        scroll_controller.connect("scroll", self._on_entrybox_scroll)
+        self.entry.add_controller(scroll_controller)
         self.entry.connect("icon-press", self.on_entrybox_icon_press)
-        self.pack_start(self.entry, True, True, 0)  # Deprecated in Gtk4, use append instead
+        self.append(self.entry)
         GLib.idle_add(self._populate_entrybox_choices, choice_func)
 
     def get_model(self):
@@ -53,43 +61,56 @@ class SearchableEntrybox(Gtk.Box):
 
     def search_store(self, _completion, string, _iter):
         """Return true if the search string is in the row text."""
-        row_text = self.liststore[_iter][0].lower()  # search is always lower case
+        row_text = self.liststore[_iter][0].lower()
         return string.lower() in row_text
 
+    def _clear_popup_choices(self):
+        child = self._list_box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            self._list_box.remove(child)
+            child = next_child
+
     def _populate_entrybox_choices(self, choice_func):
-        """Populate the liststore and popup menu with choices."""
+        """Populate the liststore and popup list with choices."""
         try:
             choices = choice_func()
+            self._clear_popup_choices()
             for choice in choices:
                 self.liststore.append(choice)
-                menu_item = Gtk.MenuItem(label=choice[0])
-                menu_item.connect("activate", self.on_menu_item_activate, choice[1])
-                self.popup_menu.append(menu_item)
+                row_button = Gtk.Button(label=choice[0])
+                row_button.set_has_frame(False)
+                row_button.connect("clicked", self.on_list_item_clicked, choice[0], choice[1])
+                self._list_box.append(row_button)
 
             if self.initial:
                 self._set_initial_text()
                 self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "emblem-ok-symbolic")
             else:
                 self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "system-search-symbolic")
-
-            self.popup_menu.show_all()
         except Exception as ex:
             self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "error-symbolic")
-            display_error(ex, parent=self.get_toplevel())  # Deprecated in Gtk4, use get_root instead
+            display_error(ex, parent=get_widget_window(self))
 
     def repopulate(self):
         """Clear and repopulate choices; used when an async choices load completes."""
         self.liststore.clear()
-        self.popup_menu = Gtk.Menu()
         self._populate_entrybox_choices(self.choice_func)
 
     def on_entrybox_icon_press(self, _entry, _icon_pos, _event):
-        """Show popup menu when the primary icon is pressed."""
-        self.popup_menu.popup_at_widget(self.entry, Gdk.Gravity.SOUTH, Gdk.Gravity.NORTH, None)
+        """Show popup list when the primary icon is pressed."""
+        rect = Gdk.Rectangle()
+        rect.x = 0
+        rect.y = self.entry.get_height()
+        rect.width = self.entry.get_width()
+        rect.height = 1
+        self._popover.set_pointing_to(rect)
+        self._popover.popup()
 
-    def on_menu_item_activate(self, menu_item, active_id):
+    def on_list_item_clicked(self, _button, label, active_id):
         """Set the selected item text in the entry and emit the changed signal."""
-        self.entry.set_text(menu_item.get_label())
+        self.entry.set_text(label)
+        self._popover.popdown()
         self.emit("changed", active_id)
 
     def _set_initial_text(self):
@@ -99,11 +120,9 @@ class SearchableEntrybox(Gtk.Box):
                 self.entry.set_text(row[0])
                 break
 
-    @staticmethod
-    def _on_entrybox_scroll(entrybox, _event):
+    def _on_entrybox_scroll(self, _controller, _dx, _dy):
         """Prevents users from accidentally changing configuration values while scrolling down dialogs."""
-        entrybox.stop_emission_by_name("scroll-event")
-        return False
+        return True
 
     def on_entrybox_change(self, _widget):
         """Action triggered on entrybox 'changed' signal."""
@@ -116,14 +135,10 @@ class SearchableEntrybox(Gtk.Box):
         """Updates the icon based on the search result."""
         text = self.entry.get_text()
         if not text:
-            # No text
             self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "system-search-symbolic")
         elif any(row[0] == text for row in self.liststore):
-            # Valid option selected
             self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "emblem-ok-symbolic")
         elif any(text.lower() in row[0].lower() for row in self.liststore):
-            # Partial results found
             self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "content-loading-symbolic")
         else:
-            # No results
             self.entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, "action-unavailable-symbolic")

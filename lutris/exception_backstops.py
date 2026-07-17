@@ -62,8 +62,8 @@ def _get_error_parent(error_objects: Iterable[GObject.Object | None]) -> Gtk.Win
             continue
 
         try:
-            if error_object and hasattr(error_object, "get_toplevel"):
-                toplevel: Gtk.Window = error_object.get_toplevel()
+            if error_object and hasattr(error_object, "get_root"):
+                toplevel: Gtk.Window = error_object.get_root()
                 if toplevel:
                     return toplevel
         except GLib.GError:

@@ -40,19 +40,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsystemd-dev \
     python3-gi \
     python3-dbus \
-    gir1.2-gtk-3.0 \
+    gir1.2-gtk-4.0 \
+    gir1.2-adw-1 \
     gir1.2-gdkpixbuf-2.0 \
     gir1.2-pango-1.0 \
-    gir1.2-gnomedesktop-3.0 \
-    gir1.2-webkit2-4.1 \
+    gir1.2-gnomedesktop-4.0 \
+    gir1.2-webkit-6.0 \
     gir1.2-notify-0.7 \
     gir1.2-ayatanaappindicator3-0.1 \
-    libgtk-3-0 \
-    libgtk-3-bin \
-    libwebkit2gtk-4.1-0 \
+    libgtk-4-1 \
+    libadwaita-1-0 \
+    libwebkitgtk-6.0-4 \
     libnotify4 \
     libayatana-appindicator3-1 \
-    libgnome-desktop-3-20t64 \
+    libgnome-desktop-4-2t64 \
     glib-networking \
     adwaita-icon-theme \
     librsvg2-common \

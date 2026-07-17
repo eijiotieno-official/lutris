@@ -1,6 +1,6 @@
 from collections.abc import Callable
 
-from gi.repository import Gtk
+from gi.repository import Adw, Gtk
 
 from lutris import settings
 from lutris.gui.config.widget_generator import WidgetWarningMessageBox
@@ -12,34 +12,32 @@ class BaseConfigBox(VBox):
 
     def __init__(self):
         super().__init__(visible=True, spacing=12)
-        self.accelerators = None
+        self.shortcut_controller = None
         self.set_margin_top(50)
         self.set_margin_bottom(50)
-        self.set_margin_right(80)
-        self.set_margin_left(80)
+        self.set_margin_end(80)
+        self.set_margin_start(80)
 
     def get_section_label(self, text: str) -> Gtk.Label:
         label = Gtk.Label(visible=True)
         label.set_markup("<b>%s</b>" % text)
-        label.set_alignment(0, 0.5)
+        label.set_xalign(0)
+        label.set_yalign(0.5)
         return label
 
     def get_description_label(self, text: str) -> Gtk.Label:
         label = Gtk.Label(visible=True)
         label.set_markup("%s" % text)
-        label.set_line_wrap(True)
-        label.set_alignment(0, 0.5)
+        label.set_wrap(True)
+        label.set_xalign(0)
+        label.set_yalign(0.5)
         return label
 
-    def _get_framed_options_list_box(self, items):
-        frame = Gtk.Frame(visible=True, shadow_type=Gtk.ShadowType.ETCHED_IN)
-
-        list_box = Gtk.ListBox(visible=True, selection_mode=Gtk.SelectionMode.NONE)
-        frame.add(list_box)
-
+    def _get_framed_options_group(self, items):
+        group = Adw.PreferencesGroup(visible=True)
         for item in items:
-            list_box.add(Gtk.ListBoxRow(child=item, visible=True, activatable=False))
-        return frame
+            group.add(item)
+        return group
 
     def get_setting_box(
         self,
@@ -78,16 +76,16 @@ class BaseConfigBox(VBox):
                 )
 
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=True)
-            box.pack_start(inner_box, False, False, 0)
+            box.append(inner_box)
             if warning_box:
-                box.pack_start(warning_box, False, False, 0)
+                box.append(warning_box)
             if extra_widget:
-                box.pack_start(extra_widget, False, False, 0)
+                box.append(extra_widget)
 
         box.set_margin_top(12)
         box.set_margin_bottom(12)
-        box.set_margin_left(12)
-        box.set_margin_right(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
         return box
 
     def _get_inner_settings_box(
@@ -99,28 +97,37 @@ class BaseConfigBox(VBox):
         margin: int = 12,
         when_setting_changed: Callable[[bool], None] | None = None,
     ):
-        checkbox = Gtk.Switch(visible=True, valign=Gtk.Align.CENTER)
-        checkbox.set_active(setting_value)
-        checkbox.connect("state-set", self.on_setting_change, setting_key, when_setting_changed)
+        row = Adw.SwitchRow(title=label, active=setting_value)
+        row.connect("state-set", self.on_setting_change, setting_key, when_setting_changed)
 
-        if accelerator:
+        if accelerator and self.shortcut_controller:
             key, mod = Gtk.accelerator_parse(accelerator)
-            checkbox.add_accelerator("activate", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
+            shortcut = Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.new_gtk_keyval(key, mod),
+                Gtk.CallbackAction.new(lambda *_args: row.activate() or True),
+            )
+            self.shortcut_controller.add_shortcut(shortcut)
 
-        return self.get_listed_widget_box(label, checkbox, margin=margin)
+        if margin:
+            row.set_margin_start(margin)
+            row.set_margin_end(margin)
+            row.set_margin_top(margin)
+            row.set_margin_bottom(margin)
+        return row
 
-    def get_listed_widget_box(self, label: str, widget: Gtk.Widget, margin: int = 12) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, margin=margin, visible=True)
-        label = Gtk.Label(label=label, visible=True, wrap=True)
-        label.set_alignment(0, 0.5)
-        box.pack_start(label, True, True, 0)
-        box.pack_end(widget, False, False, 0)
-        return box
+    def get_listed_widget_box(self, label: str, widget: Gtk.Widget, margin: int = 12) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=label)
+        row.set_activatable_widget(widget)
+        if margin:
+            row.set_margin_start(margin)
+            row.set_margin_end(margin)
+            row.set_margin_top(margin)
+            row.set_margin_bottom(margin)
+        return row
 
     def on_setting_change(
         self, _widget, state: bool, setting_key: str, when_setting_changed: Callable[[bool], None] | None = None
     ) -> None:
-        """Save a setting when an option is toggled"""
         settings.write_setting(setting_key, state)
         if when_setting_changed:
             when_setting_changed(state)

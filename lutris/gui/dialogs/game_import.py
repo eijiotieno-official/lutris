@@ -32,19 +32,24 @@ class ImportGameDialog(ModelessDialog):
         self.search_call = None
         self.set_size_request(500, 560)
 
-        self.accelerators = Gtk.AccelGroup()
-        self.add_accel_group(self.accelerators)
-
-        scrolledwindow = Gtk.ScrolledWindow(child=self.get_file_labels_listbox(files))
+        scrolledwindow = Gtk.ScrolledWindow()
+        scrolledwindow.set_child(self.get_file_labels_listbox(files))
         scrolledwindow.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        frame = Gtk.Frame(shadow_type=Gtk.ShadowType.ETCHED_IN, child=scrolledwindow)
-        self.get_content_area().pack_start(frame, True, True, 6)
+        frame = Gtk.Frame()
+        frame.set_child(scrolledwindow)
+        frame.set_vexpand(True)
+        self.get_content_area().append(frame)
 
-        self.close_button = self.add_button(Gtk.STOCK_STOP, Gtk.ResponseType.CANCEL)
-        key, mod = Gtk.accelerator_parse("Escape")
-        self.close_button.add_accelerator("clicked", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
+        self.close_button = self.add_button(_("Stop"), Gtk.ResponseType.CANCEL)
 
-        self.show_all()
+        controller = Gtk.ShortcutController()
+        shortcut = Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("Escape"),
+            Gtk.CallbackAction.new(lambda *_args: self.close_button.emit("clicked") or True),
+        )
+        controller.add_shortcut(shortcut)
+        self.add_controller(controller)
+
         self.search_call = AsyncCall(self.search_checksums, self.search_result_finished)
 
     def on_response(self, dialog, response: Gtk.ResponseType) -> None:
@@ -56,49 +61,54 @@ class ImportGameDialog(ModelessDialog):
         super().on_response(dialog, response)
 
     def get_file_labels_listbox(self, files):
-        listbox = Gtk.ListBox(vexpand=True)
+        listbox = Gtk.ListBox()
+        listbox.set_vexpand(True)
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         for file_path in files:
             row = Gtk.ListBoxRow()
             hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            hbox.set_margin_left(12)
-            hbox.set_margin_right(12)
+            hbox.set_margin_start(12)
+            hbox.set_margin_end(12)
 
             vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
             description_label = Gtk.Label(halign=Gtk.Align.START)
-            vbox.pack_start(description_label, True, True, 5)
+            vbox.append(description_label)
             self.description_labels[file_path] = description_label
 
-            file_path_label = Gtk.Label(file_path, halign=Gtk.Align.START, xalign=0)
-            file_path_label.set_line_wrap(True)
-            vbox.pack_start(file_path_label, True, True, 5)
+            file_path_label = Gtk.Label(label=file_path, halign=Gtk.Align.START, xalign=0)
+            file_path_label.set_wrap(True)
+            vbox.append(file_path_label)
 
             progress_label = Gtk.Label(halign=Gtk.Align.START)
-            vbox.pack_start(progress_label, True, True, 5)
+            vbox.append(progress_label)
             self.progress_labels[file_path] = progress_label
 
-            checksum_label = Gtk.Label(no_show_all=True, halign=Gtk.Align.START)
-            vbox.pack_start(checksum_label, True, True, 5)
+            checksum_label = Gtk.Label(halign=Gtk.Align.START)
+            checksum_label.set_visible(False)
+            vbox.append(checksum_label)
             self.checksum_labels[file_path] = checksum_label
 
-            category_label = Gtk.Label(no_show_all=True, halign=Gtk.Align.START)
-            vbox.pack_start(category_label, True, True, 5)
+            category_label = Gtk.Label(halign=Gtk.Align.START)
+            category_label.set_visible(False)
+            vbox.append(category_label)
             self.category_labels[file_path] = category_label
 
-            error_label = Gtk.Label(no_show_all=True, halign=Gtk.Align.START, xalign=0)
-            error_label.set_line_wrap(True)
-            vbox.pack_start(error_label, True, True, 5)
+            error_label = Gtk.Label(halign=Gtk.Align.START, xalign=0)
+            error_label.set_wrap(True)
+            error_label.set_visible(False)
+            vbox.append(error_label)
             self.error_labels[file_path] = error_label
 
-            hbox.pack_start(vbox, True, True, 0)
+            hbox.append(vbox)
+            hbox.set_hexpand(True)
 
-            launch_button = Gtk.Button(_("Launch"), valign=Gtk.Align.CENTER, sensitive=False)
-            hbox.pack_end(launch_button, False, False, 0)
+            launch_button = Gtk.Button(label=_("Launch"), valign=Gtk.Align.CENTER, sensitive=False)
+            hbox.append(launch_button)
             self.launch_buttons[file_path] = launch_button
 
-            row.add(hbox)
-            listbox.add(row)
+            row.set_child(hbox)
+            listbox.append(row)
         return listbox
 
     @property
@@ -135,7 +145,7 @@ class ImportGameDialog(ModelessDialog):
             if self.search_stopping:
                 return None
 
-            show_progress(filename, _("Looking up checksum on Lutris.net..."))
+            show_progress(filepath, _("Looking up checksum on Lutris.net..."))
             result = search_tosec_by_md5(md5)
             if not result:
                 raise RuntimeError(_("This ROM could not be identified."))
@@ -161,7 +171,7 @@ class ImportGameDialog(ModelessDialog):
 
     def search_result_finished(self, results, error):
         self.search_call = None
-        self.close_button.set_label(Gtk.STOCK_CLOSE)
+        self.close_button.set_label(_("Close"))
 
         if error:
             logger.error(error)
@@ -176,7 +186,7 @@ class ImportGameDialog(ModelessDialog):
         """Tries to install a specific ROM, or reports failure. Returns True if
         successful, False if not."""
         try:
-            self.progress_labels[filename].hide()
+            self.progress_labels[filename].set_visible(False)
 
             if "error" in rom_set:
                 raise rom_set["error"]
@@ -199,7 +209,7 @@ class ImportGameDialog(ModelessDialog):
             logger.exception(_("Failed to import a ROM: %s"), ex)
             error_label = self.error_labels[filename]
             error_label.set_markup('<span style="italic" foreground="red">%s</span>' % gtk_safe(str(ex)))
-            error_label.show()
+            error_label.set_visible(True)
 
         return False
 
@@ -218,24 +228,24 @@ class ImportGameDialog(ModelessDialog):
     def display_existing_game_info(self, filename, game):
         label = self.checksum_labels[filename]
         label.set_markup("<i>%s</i>" % _("Game already installed in Lutris"))
-        label.show()
+        label.set_visible(True)
         label = self.description_labels[filename]
         label.set_markup("<b>%s</b>" % game.name)
         category = game.platform
         label = self.category_labels[filename]
         label.set_text(category)
-        label.show()
+        label.set_visible(True)
 
     def display_new_game_info(self, filename, rom_set, checksum):
         label = self.checksum_labels[filename]
         label.set_text(checksum)
-        label.show()
+        label.set_visible(True)
         label = self.description_labels[filename]
         label.set_markup("<b>%s</b>" % rom_set["name"])
         category = rom_set["category"]["name"]
         label = self.category_labels[filename]
         label.set_text(category)
-        label.show()
+        label.set_visible(True)
         self.platform = guess_platform(rom_set)
 
         if not self.platform:

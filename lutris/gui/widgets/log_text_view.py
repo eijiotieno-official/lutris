@@ -1,6 +1,5 @@
 from typing import Any
 
-# Third Party Libraries
 from gi.repository import Gtk
 
 
@@ -10,7 +9,7 @@ class LogTextView(Gtk.TextView):
     def __init__(
         self, buffer: Gtk.TextBuffer | None = None, autoscroll: bool = True, wrap_mode: Gtk.WrapMode = Gtk.WrapMode.CHAR
     ):
-        super().__init__(visible=True)
+        super().__init__()
 
         if buffer:
             self.set_buffer(buffer)
@@ -20,7 +19,7 @@ class LogTextView(Gtk.TextView):
         self.set_left_margin(10)
         self.scroll_max = 0
         self.set_wrap_mode(wrap_mode)
-        self.get_style_context().add_class("lutris-logview")
+        self.add_css_class("lutris-logview")
 
         self.mark = self.create_new_mark(self.props.buffer.get_start_iter())
 
@@ -53,20 +52,17 @@ class LogTextView(Gtk.TextView):
             searched_entry.get_text(), Gtk.TextSearchFlags.CASE_INSENSITIVE, None
         )
 
-        # Found nothing try from the beginning
         if next_occurence is None:
             next_occurence = self.props.buffer.get_start_iter().forward_search(
                 searched_entry.get_text(), Gtk.TextSearchFlags.CASE_INSENSITIVE, None
             )
 
-        # Highlight if result
         if next_occurence is not None:
             self.highlight(next_occurence[0], next_occurence[1])
             self.props.buffer.delete_mark(self.mark)
             self.mark = self.create_new_mark(next_occurence[1])
 
     def find_previous(self, searched_entry: Gtk.SearchEntry) -> None:
-        # First go to the beginning of searched_entry string
         buffer_iter = self.props.buffer.get_iter_at_mark(self.mark)
         buffer_iter.backward_chars(len(searched_entry.get_text()))
 
@@ -74,13 +70,11 @@ class LogTextView(Gtk.TextView):
             searched_entry.get_text(), Gtk.TextSearchFlags.CASE_INSENSITIVE, None
         )
 
-        # Found nothing ? Try from the end
         if previous_occurence is None:
             previous_occurence = self.props.buffer.get_end_iter().backward_search(
                 searched_entry.get_text(), Gtk.TextSearchFlags.CASE_INSENSITIVE, None
             )
 
-        # Highlight if result
         if previous_occurence is not None:
             self.highlight(previous_occurence[0], previous_occurence[1])
             self.props.buffer.delete_mark(self.mark)
@@ -88,5 +82,4 @@ class LogTextView(Gtk.TextView):
 
     def highlight(self, range_start: Gtk.TextIter, range_end: Gtk.TextIter) -> None:
         self.props.buffer.select_range(range_start, range_end)
-        # Focus
         self.scroll_mark_onscreen(self.mark)

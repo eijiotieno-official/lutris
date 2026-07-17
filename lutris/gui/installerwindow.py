@@ -47,7 +47,8 @@ class MarkupLabel(Gtk.Label):
 
     def __init__(self, markup=None, **kwargs):
         super().__init__(label=markup, use_markup=True, wrap=True, justify=Gtk.Justification.CENTER, **kwargs)
-        self.set_alignment(0.5, 0)
+        self.set_xalign(0.5)
+        self.set_yalign(0)
 
 
 class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter.InterpreterUIDelegate):  # type:ignore[misc]
@@ -77,51 +78,60 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         self.installation_kind = installation_kind
         self.continue_handler = None
 
-        self.accelerators = Gtk.AccelGroup()
-        self.add_accel_group(self.accelerators)
+        self.shortcut_controller = Gtk.ShortcutController()
+        self.add_controller(self.shortcut_controller)
 
         content_area = self.get_content_area()
 
         content_area.set_margin_top(18)
         content_area.set_margin_bottom(18)
-        content_area.set_margin_right(18)
-        content_area.set_margin_left(18)
+        content_area.set_margin_end(18)
+        content_area.set_margin_start(18)
         content_area.set_spacing(12)
 
-        # Header labels
-        self.status_label = MarkupLabel(no_show_all=True)
-        content_area.pack_start(self.status_label, False, False, 0)
+        self.status_label = MarkupLabel()
+        self.status_label.set_visible(False)
+        content_area.append(self.status_label)
 
-        # Header bar buttons
         self.back_button = self.add_start_button(_("Back"), self.on_back_clicked)
-        self.back_button.set_no_show_all(True)
+        self.back_button.set_visible(False)
         key, mod = Gtk.accelerator_parse("<Alt>Left")
-        self.back_button.add_accelerator("clicked", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
+        self.back_button.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.new_gtk_keyval(key, mod), Gtk.CallbackAction.new(lambda *_a: self.on_back_clicked(self.back_button) or True)))
         key, mod = Gtk.accelerator_parse("<Alt>Home")
-        self.accelerators.connect(key, mod, Gtk.AccelFlags.VISIBLE, self.on_navigate_home)
+        self.shortcut_controller.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.new_gtk_keyval(key, mod),
+                Gtk.CallbackAction.new(lambda *_a: self.on_navigate_home(None, None, None, None) or True),
+            )
+        )
 
         self.cancel_button = self.add_start_button(_("Cancel"), self.on_cancel_clicked)
-        self.get_header_bar().set_show_close_button(False)
+        self.get_header_bar().set_show_title_buttons(False)
 
         self.continue_button = self.add_end_button(_("_Continue"))
 
-        # The cancel button doubles as 'Close' and 'Abort' depending on the state of the install
         key, mod = Gtk.accelerator_parse("Escape")
-        self.cancel_button.add_accelerator("clicked", self.accelerators, key, mod, Gtk.AccelFlags.VISIBLE)
+        self.cancel_button.add_shortcut(
+            Gtk.Shortcut.new(
+                Gtk.ShortcutTrigger.new_gtk_keyval(key, mod),
+                Gtk.CallbackAction.new(lambda *_a: self.on_cancel_clicked(self.cancel_button) or True),
+            )
+        )
 
-        # Navigation stack
         self.stack = NavigationStack(self.back_button, cancel_button=self.cancel_button)
         self.register_page_creators()
-        content_area.pack_start(self.stack, True, True, 0)
+        content_area.append(self.stack)
 
-        # Menu buttons
-        menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.MENU)
+        menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic")
         self.menu_button = Gtk.MenuButton(child=menu_icon)
         self.menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=True, halign=Gtk.Align.END)
-        self.menu_box.set_border_width(9)
+        self.menu_box.set_margin_start(9)
+        self.menu_box.set_margin_end(9)
+        self.menu_box.set_margin_top(9)
+        self.menu_box.set_margin_bottom(9)
         self.menu_box.set_spacing(3)
         self.menu_box.set_can_focus(False)
-        self.menu_button.set_popover(Gtk.Popover(child=self.menu_box, can_focus=False, relative_to=self.menu_button))
+        self.menu_button.set_popover(Gtk.Popover(child=self.menu_box, can_focus=False))
         self.get_header_bar().pack_end(self.menu_button)
 
         self.cache_button = self.add_menu_button(
@@ -157,53 +167,53 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         self.installer_files_box.connect("files-ready", self.on_files_ready)
 
         self.log_buffer = Gtk.TextBuffer()
-        self.error_details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, no_show_all=True)
+        self.error_details_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.error_details_buffer = Gtk.TextBuffer()
         self.error_reporter = self.load_error_page
 
         # And... go!
         self.load_first_page()
-        self.show_all()
+        
         self.present()
 
     def add_start_button(self, label, handler=None, tooltip=None, sensitive=True):
         button = Gtk.Button.new_with_mnemonic(label)
         button.set_sensitive(sensitive)
-        button.set_no_show_all(True)
+        button.set_visible(False)
         if tooltip:
             button.set_tooltip_text(tooltip)
         if handler:
             button.connect("clicked", handler)
 
         header_bar = self.get_header_bar()
-        header_bar.pack_start(button)
+        header_bar.append(button)
         return button
 
-    def add_end_button(self, label, handler=None, tooltip=None, sensitive=True):
+    def add_end_button(self):
         """Add a button to the action buttons box"""
         button = Gtk.Button.new_with_mnemonic(label)
         button.set_sensitive(sensitive)
-        button.set_no_show_all(True)
+        button.set_visible(False)
         if tooltip:
             button.set_tooltip_text(tooltip)
         if handler:
             button.connect("clicked", handler)
 
         header_bar = self.get_header_bar()
-        header_bar.pack_end(button)
+        header_bar.append(button)
         return button
 
-    def add_menu_button(self, label, handler=None, tooltip=None, sensitive=True):
+    def add_menu_button(self):
         """Add a button to the menu in the header bar"""
         button = Gtk.ModelButton(label, visible=True, xalign=0.0)
         button.set_sensitive(sensitive)
-        button.set_no_show_all(True)
+        button.set_visible(False)
         if tooltip:
             button.set_tooltip_text(tooltip)
         if handler:
             button.connect("clicked", handler)
 
-        self.menu_box.pack_start(button, False, False, 0)
+        self.menu_box.append(button)
         return button
 
     def on_cache_clicked(self, _button):
@@ -239,7 +249,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         if self.install_in_progress:
             widgets = []
 
-            remove_checkbox = Gtk.CheckButton.new_with_label(_("Remove game files"))
+            remove_checkbox = Gtk.CheckButton(label=_("Remove game files"))
             if (
                 self.interpreter
                 and self.interpreter.target_path
@@ -248,7 +258,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
                 and is_removeable(self.interpreter.target_path, LutrisConfig().system_config)
             ):
                 remove_checkbox.set_active(self.interpreter.game_dir_created)
-                remove_checkbox.show()
+                remove_checkbox.set_visible(True)
                 widgets.append(remove_checkbox)
 
             confirm_cancel_dialog = QuestionDialog(
@@ -356,13 +366,13 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         if not hasattr(self, "install_progress_bar"):
             return
         if fraction is None:
-            self.install_progress_bar.hide()
+            self.install_progress_bar.set_visible(False)
             return
         self.install_progress_bar.set_fraction(fraction)
         if text:
             self.install_progress_bar.set_text(text)
             self.install_progress_bar.set_show_text(True)
-        self.install_progress_bar.show()
+        self.install_progress_bar.set_visible(True)
 
     def attach_log(self, command):
         # Hook the log buffer right now, lest we miss updates.
@@ -396,8 +406,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         installer_picker = InstallerPicker(self.installers)
         installer_picker.connect("installer-selected", self.on_installer_selected)
         return Gtk.ScrolledWindow(
-            hexpand=True, vexpand=True, child=installer_picker, shadow_type=Gtk.ShadowType.ETCHED_IN
-        )
+            hexpand=True, vexpand=True, child=installer_picker, )
 
     def present_choose_installer_page(self):
         """Stage where we choose an install script."""
@@ -473,27 +482,27 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         installer_create_menu_shortcut = settings.read_bool_setting("installer_create_menu_shortcut", False)
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        vbox.pack_start(self.location_entry, False, False, 0)
+        vbox.append(self.location_entry)
 
         desktop_shortcut_button = Gtk.CheckButton(_("Create desktop shortcut"), visible=True)
         desktop_shortcut_button.set_active(installer_create_desktop_shortcut)
         desktop_shortcut_button.connect("clicked", self.on_create_desktop_shortcut_clicked)
         self.config["create_desktop_shortcut"] = installer_create_desktop_shortcut
 
-        vbox.pack_start(desktop_shortcut_button, False, False, 0)
+        vbox.append(desktop_shortcut_button)
 
         menu_shortcut_button = Gtk.CheckButton(_("Create application menu shortcut"), visible=True)
         menu_shortcut_button.set_active(installer_create_menu_shortcut)
         menu_shortcut_button.connect("clicked", self.on_create_menu_shortcut_clicked)
         self.config["create_menu_shortcut"] = installer_create_menu_shortcut
 
-        vbox.pack_start(menu_shortcut_button, False, False, 0)
+        vbox.append(menu_shortcut_button)
 
         if steam_shortcut.vdf_file_exists():
             steam_shortcut_button = Gtk.CheckButton(_("Create Steam shortcut"), visible=True)
             steam_shortcut_button.set_active(settings.read_bool_setting("installer_create_steam_shortcut", False))
             steam_shortcut_button.connect("clicked", self.on_create_steam_shortcut_clicked)
-            vbox.pack_start(steam_shortcut_button, False, False, 0)
+            vbox.append(steam_shortcut_button)
         return vbox
 
     def present_destination_page(self):
@@ -591,8 +600,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
         treeview.append_column(label_column)
 
         return Gtk.ScrolledWindow(
-            hexpand=True, vexpand=True, child=treeview, visible=True, shadow_type=Gtk.ShadowType.ETCHED_IN
-        )
+            hexpand=True, vexpand=True, child=treeview, visible=True, )
 
     def present_extras_page(self):
         """Show installer screen with the extras picker"""
@@ -693,8 +701,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
             vexpand=True,
             child=self.installer_files_box,
             visible=True,
-            shadow_type=Gtk.ShadowType.ETCHED_IN,
-        )
+            )
 
     def present_installer_files_page(self):
         """Show installer screen with the file picker / downloader"""
@@ -776,12 +783,12 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
 
         spinner = Gtk.Spinner(halign=Gtk.Align.CENTER)
         spinner.start()
-        box.pack_start(spinner, False, False, 0)
+        box.append(spinner)
 
         self.install_progress_bar = Gtk.ProgressBar()
-        self.install_progress_bar.set_no_show_all(True)
+        self.install_progress_bar.set_visible(False)
         self.install_progress_bar.set_size_request(400, -1)
-        box.pack_start(self.install_progress_bar, False, False, 0)
+        box.append(self.install_progress_bar)
 
         return box
 
@@ -795,7 +802,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
 
     def create_log_page(self):
         log_textview = LogTextView(self.log_buffer)
-        return Gtk.ScrolledWindow(hexpand=True, vexpand=True, child=log_textview, shadow_type=Gtk.ShadowType.ETCHED_IN)
+        return Gtk.ScrolledWindow(hexpand=True, vexpand=True, child=log_textview, )
 
     def present_log_page(self):
         """Creates a TextBuffer and attach it to a command"""
@@ -839,7 +846,7 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
 
             combobox = Gtk.ComboBox.new_with_model(model)
             renderer_text = Gtk.CellRendererText()
-            combobox.pack_start(renderer_text, True)
+            combobox.append(renderer_text)
             combobox.add_attribute(renderer_text, "text", 1)
             combobox.set_id_column(0)
             combobox.set_halign(Gtk.Align.CENTER)
@@ -881,12 +888,12 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
 
             vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             label = MarkupLabel(message_markup)
-            vbox.pack_start(label, False, False, 0)
+            vbox.append(label)
 
             buttons_box = Gtk.Box()
             buttons_box.set_margin_top(40)
             buttons_box.set_margin_bottom(40)
-            vbox.pack_start(buttons_box, False, False, 0)
+            vbox.append(buttons_box)
 
             if not LINUX_SYSTEM.is_flatpak():
                 # Lutris flatplak doesn't autodetect files on CD-ROM properly
@@ -895,21 +902,20 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
                 autodetect_button = Gtk.Button(label=_("Autodetect"))
                 autodetect_button.connect("clicked", wrapped_callback, requires)
                 autodetect_button.grab_focus()
-                buttons_box.pack_start(autodetect_button, True, True, 40)
+                buttons_box.append(autodetect_button)
 
             browse_button = Gtk.Button(label=_("Browse…"))
             callback_data = {"callback": wrapped_callback, "requires": requires}
             browse_button.connect("clicked", self.on_browse_clicked, callback_data)
-            buttons_box.pack_start(browse_button, True, True, 40)
+            buttons_box.append(browse_button)
 
             self.stack.present_replacement_page("ask_for_disc", vbox)
             if installer.runner == "wine":
                 eject_button = Gtk.Button(_("Eject"), halign=Gtk.Align.END)
                 eject_button.connect("clicked", self.on_eject_clicked)
-                vbox.pack_end(eject_button, False, False, 0)
-                vbox.pack_end(Gtk.Separator(), False, False, 0)
+                vbox.append(eject_button)
+                vbox.append(Gtk.Separator())
 
-            vbox.show_all()
             self.display_cancel_button()
 
         previous_page = self.stack.save_current_page()
@@ -962,8 +968,8 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
                 self.error_details_buffer.get_start_iter(), self.error_details_buffer.get_end_iter(), True
             )
             text = f"{status}\n\n{details}"
-            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(text, -1)
+            clipboard = Gdk.Display.get_default().get_clipboard()
+            clipboard.set(text)
 
         error_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
@@ -976,20 +982,20 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
                 "<a href='https://discordapp.com/invite/Pnt5CuY'>Discord</a>."
             )
         )
-        self.error_details_box.pack_start(label, False, False, 0)
+        self.error_details_box.append(label)
 
-        frame = Gtk.Frame(shadow_type=Gtk.ShadowType.ETCHED_IN)
+        frame = Gtk.Frame()
 
         details_textview = Gtk.TextView(editable=False, buffer=self.error_details_buffer)
 
         scrolledwindow = Gtk.ScrolledWindow()
-        scrolledwindow.add(details_textview)
-        frame.add(scrolledwindow)
-        self.error_details_box.pack_start(frame, True, True, 0)
-        error_box.pack_start(self.error_details_box, True, True, 0)
+        scrolledwindow.set_child(details_textview)
+        frame.set_child(scrolledwindow)
+        self.error_details_box.append(frame)
+        error_box.append(self.error_details_box)
 
         copy_button = Gtk.Button(label=_("Copy Details to Clipboard"), halign=Gtk.Align.START)
-        error_box.pack_end(copy_button, False, True, 0)
+        error_box.append(copy_button)
         copy_button.connect("clicked", on_copy_clicked)
 
         return error_box

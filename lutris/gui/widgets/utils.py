@@ -27,6 +27,13 @@ BANNER_SIZE = (184, 69)
 MEDIA_CACHE_INVALIDATED = NotificationSource()
 
 
+def get_icon_theme(display: Gdk.Display | None = None) -> Gtk.IconTheme:
+    """Return the icon theme for a display (GTK4)."""
+    if display is None:
+        display = Gdk.Display.get_default()
+    return Gtk.IconTheme.get_for_display(display)
+
+
 def get_application() -> "LutrisApplication | None":
     return cast("LutrisApplication", Gio.Application.get_default())
 
@@ -68,17 +75,31 @@ def get_widget_window(widget: Gtk.Widget | None) -> Gtk.Window | None:
 TChildWidget = TypeVar("TChildWidget", bound=Gtk.Widget)
 
 
+def iter_widget_children(widget: Gtk.Widget | None) -> Iterable[Gtk.Widget]:
+    """Iterate the direct children of a widget."""
+    if not widget:
+        return
+    child = widget.get_first_child()
+    while child:
+        yield child
+        child = child.get_next_sibling()
+
+
 def get_widget_children(widget: Gtk.Widget | None, child_type: type[TChildWidget] | None = None) -> list[TChildWidget]:
     """Returns the children of any widget; non-containers have no children
     and returns an empty list. This can filter out a specific type of child widget if child_type
     is not None, but otherwise it returns all children."""
-    if isinstance(widget, Gtk.Container):
-        if child_type:
-            return [w for w in widget.get_children() if isinstance(w, child_type)]
-        else:
-            return list(cast(Iterable[TChildWidget], widget.get_children()))
-    else:
-        return []
+    children = list(iter_widget_children(widget))
+    if child_type:
+        return [w for w in children if isinstance(w, child_type)]
+    return list(cast(Iterable[TChildWidget], children))
+
+
+def clear_box_children(box: Gtk.Box, keep_first: int = 0) -> None:
+    """Remove all but the first keep_first children from a Gtk.Box."""
+    children = list(iter_widget_children(box))
+    for child in children[keep_first:]:
+        box.remove(child)
 
 
 def open_uri(uri: str) -> None:
@@ -212,7 +233,7 @@ def has_stock_icon(name: str) -> bool:
     if not name:
         return False
 
-    theme = Gtk.IconTheme.get_default()
+    theme = get_icon_theme()
     return theme.has_icon(name)
 
 
@@ -323,7 +344,7 @@ def paste_overlay(base_image: "Image.Image", overlay_image: "Image.Image", posit
 
 def load_icon_theme() -> None:
     """Add the lutris icon folder to the default theme"""
-    icon_theme = Gtk.IconTheme.get_default()
+    icon_theme = get_icon_theme()
     local_theme_path = os.path.join(settings.RUNTIME_DIR, "icons")
     if local_theme_path not in icon_theme.get_search_path():
-        icon_theme.prepend_search_path(local_theme_path)
+        icon_theme.set_search_path([local_theme_path, *icon_theme.get_search_path()])

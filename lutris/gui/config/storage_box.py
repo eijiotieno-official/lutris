@@ -23,7 +23,7 @@ class StorageBox(BaseConfigBox):
 
         self.add(self.get_section_label(_("Paths")))
         path_widgets = self.get_path_widgets()
-        self.pack_start(self._get_framed_options_list_box(path_widgets), False, False, 0)
+        self.append(self._get_framed_options_group(path_widgets))
         self.update_pga_cache_path_warning()
         self.update_bios_path_warning()
 
@@ -65,7 +65,7 @@ class StorageBox(BaseConfigBox):
     def get_directory_chooser(self, path_setting):
         label = Label()
         label.set_markup("<b>%s</b>" % path_setting["name"])
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4, visible=True)
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, visible=True)
         wrapper.set_margin_top(16)
 
         default_path = path_setting["default"]
@@ -77,33 +77,31 @@ class StorageBox(BaseConfigBox):
             default_path=default_path,
         )
         directory_chooser.connect("changed", self.on_file_chooser_changed, path_setting)
-        wrapper.pack_start(label, False, False, 0)
-        wrapper.pack_start(directory_chooser, True, True, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4, visible=True)
+        row.append(label)
+        directory_chooser.set_hexpand(True)
+        row.append(directory_chooser)
+        wrapper.append(row)
+
         if path_setting["help"]:
-            help_wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, visible=True)
-            help_wrapper.add(wrapper)
             help_label = Label()
             help_label.set_markup("<i>%s</i>" % path_setting["help"])
-            help_wrapper.add(help_label)
-            wrapper = help_wrapper
+            wrapper.append(help_label)
 
         if path_setting["setting"] in self.error_boxes:
             warning = self.error_boxes[path_setting["setting"]]
-            wrapper.add(warning)
+            wrapper.append(warning)
 
         wrapper.set_margin_end(16)
-        wrapper.set_margin_left(16)
+        wrapper.set_margin_start(16)
         wrapper.set_margin_bottom(16)
 
         return wrapper
 
     def is_bios_path_invalid(self, bios_path):
-        """Validates the BIOS folder. Returns (bios_path, warning), where warning is a
-        non-blocking message shown to the user (empty if the folder looks fine). The path
-        is always usable; the warnings just flag folders whose size, file count or depth
-        will make scanning slow."""
         if not bios_path:
-            return bios_path, ""  # it's fine to not have a BIOS path
+            return bios_path, ""
         MAX_BIOS_FOLDER_SIZE = 8e9
         MAX_BIOS_FILES_IN_FOLDER = 5000
         MAX_BIOS_FOLDER_DEPTH = 3
@@ -129,14 +127,11 @@ class StorageBox(BaseConfigBox):
         return bios_path, ""
 
     def update_bios_path_warning(self):
-        """Re-checks the currently saved BIOS folder and shows its warning, if any. Called
-        when the settings open so a warning persists across visits, not just on edit."""
         bios_path = Runner().config.system_config.get("bios_path") or ""
         if bios_path:
             AsyncCall(self.is_bios_path_invalid, self.show_bios_path_warning, bios_path)
 
     def show_bios_path_warning(self, result, error):
-        """Displays the BIOS folder warning box. Returns False if validation failed."""
         error_box = self.error_boxes["bios_path"]
 
         if error:

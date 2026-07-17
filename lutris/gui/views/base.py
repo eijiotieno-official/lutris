@@ -1,13 +1,13 @@
+import re
 import time
 
-from gi.repository import Gdk, GObject, Gtk
+from gi.repository import Gdk, Gio, GObject, Gtk
 
 from lutris.database.games import get_game_for_service
 from lutris.database.services import ServiceGameCollection
 from lutris.game import GAME_START, Game
 from lutris.game_actions import GameActions, get_game_actions
 from lutris.gui.widgets import EMPTY_NOTIFICATION_REGISTRATION
-from lutris.gui.widgets.contextual_menu import ContextualMenu
 from lutris.gui.widgets.utils import MEDIA_CACHE_INVALIDATED, get_application
 from lutris.util.jobs import schedule_repeating_at_idle
 from lutris.util.log import logger
@@ -29,17 +29,30 @@ class GameView:
         self.missing_games_updated_registration = EMPTY_NOTIFICATION_REGISTRATION
         self.game_start_registration = EMPTY_NOTIFICATION_REGISTRATION
         self.image_renderer = None
+        self._context_action_group = None
+        self._context_popover = None
+        self._context_callbacks = {}
 
     def connect_signals(self):
         """Signal handlers common to all views"""
         self.cache_notification_registration = MEDIA_CACHE_INVALIDATED.register(self.on_media_cache_invalidated)
         self.missing_games_updated_registration = MISSING_GAMES.updated.register(self.on_missing_games_updated)
-
-        self.connect("destroy", self.on_destroy)
-        self.connect("button-press-event", self.popup_contextual_menu)
-        self.connect("key-press-event", self.handle_key_press)
-
         self.game_start_registration = GAME_START.register(self.on_game_start)
+
+        self.connect("notify::root", self._on_root_changed)
+
+        click_controller = Gtk.GestureClick()
+        click_controller.set_button(Gdk.BUTTON_SECONDARY)
+        click_controller.connect("pressed", self._on_secondary_click)
+        self.add_controller(click_controller)
+
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.handle_key_press)
+        self.add_controller(key_controller)
+
+    def _on_root_changed(self, widget, _pspec=None):
+        if widget.get_root() is None:
+            self.on_destroy(widget)
 
     def set_game_store(self, game_store):
         self.game_store = game_store
@@ -60,25 +73,96 @@ class GameView:
         self.cache_notification_registration.unregister()
         self.missing_games_updated_registration.unregister()
         self.game_start_registration.unregister()
+        self._clear_context_actions()
 
-    def popup_contextual_menu(self, view, event):
-        """Contextual menu."""
-        if event.button != Gdk.BUTTON_SECONDARY:
+    def _clear_context_actions(self):
+        if self._context_action_group is not None:
+            self.insert_action_group("gameviewctx", None)
+            self._context_action_group = None
+        self._context_callbacks.clear()
+        self._context_popover = None
+
+    def _on_secondary_click(self, gesture, _n_press, x, y):
+        if gesture.get_current_button() != Gdk.BUTTON_SECONDARY:
             return
-        current_path = self.get_path_at(event.x, event.y)
+        self.popup_contextual_menu(x, y)
+
+    def popup_contextual_menu(self, x, y):
+        """Contextual menu."""
+        current_path = self.get_path_at(x, y)
         if current_path:
-            selection = self.get_selected()
+            selection = self.get_selected() or []
             if current_path not in selection:
                 selection = [current_path]
                 self.set_selected(selection)
 
             game_actions = self.get_game_actions_for_paths(selection)
-            contextual_menu = ContextualMenu(game_actions.get_game_actions())
-            contextual_menu.popup(event, game_actions)
+            self._show_context_menu(game_actions, x, y)
             return True
+        return False
+
+    def _show_context_menu(self, game_actions: GameActions, x: float, y: float):
+        self._clear_context_actions()
+
+        entries = game_actions.get_game_actions()
+        displayed = game_actions.get_displayed_entries()
+        visible_entries = []
+        for entry in entries:
+            action_id, label, callback = entry
+            if label == "-":
+                visible_entries.append(entry)
+                continue
+            if displayed.get(action_id, True):
+                visible_entries.append(entry)
+
+        if not visible_entries:
+            return
+
+        menu = Gio.Menu()
+        self._context_action_group = Gio.SimpleActionGroup()
+        self._context_callbacks = {}
+
+        section = Gio.Menu()
+        for action_id, label, callback in visible_entries:
+            if label == "-":
+                menu.append_section(None, section)
+                section = Gio.Menu()
+                continue
+
+            safe_action_id = re.sub(r"[^a-zA-Z0-9_-]", "_", action_id or "action")
+            action = Gio.SimpleAction.new(safe_action_id, None)
+            action.connect("activate", self._on_context_action_activated, safe_action_id)
+            self._context_action_group.add_action(action)
+            self._context_callbacks[safe_action_id] = callback
+            section.append(label, "gameviewctx.%s" % safe_action_id)
+
+        if section.get_n_items() > 0:
+            menu.append_section(None, section)
+
+        self.insert_action_group("gameviewctx", self._context_action_group)
+
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(self)
+        rect = Gdk.Rectangle()
+        rect.x = int(x)
+        rect.y = int(y)
+        rect.width = 1
+        rect.height = 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", self._on_context_popover_closed)
+        self._context_popover = popover
+        popover.popup()
+
+    def _on_context_action_activated(self, _action, _parameter, action_id):
+        callback = self._context_callbacks.get(action_id)
+        if callback:
+            callback()
+
+    def _on_context_popover_closed(self, _popover):
+        self._clear_context_actions()
 
     def get_selected_game_actions(self) -> GameActions:
-        return self.get_game_actions_for_paths(self.get_selected())
+        return self.get_game_actions_for_paths(self.get_selected() or [])
 
     def get_game_actions_for_paths(self, paths) -> GameActions:
         from lutris.gui.lutriswindow import LutrisWindow  # avoid circular import at module level
@@ -119,27 +203,30 @@ class GameView:
     def get_selected_game_id(self):
         """Returns the ID of the selected game, if there is exactly one- or
         None if there is no selection or a multiple-selection."""
-        selected = self.get_selected()
+        selected = self.get_selected() or []
         if len(selected) == 1:
             return self.get_game_id_for_path(selected[0])
         return None
 
-    def handle_key_press(self, widget, event):  # pylint: disable=unused-argument
+    def handle_key_press(self, _controller, keyval, _keycode, _state):
         try:
-            key = event.keyval
-            if key == Gdk.KEY_Delete:
+            if keyval == Gdk.KEY_Delete:
                 game_actions = self.get_selected_game_actions()
                 if game_actions.is_game_removable:
                     game_actions.on_remove_game(self)
-            elif key == Gdk.KEY_Break:
+            elif keyval == Gdk.KEY_Break:
                 game_actions = self.get_selected_game_actions()
                 if game_actions.is_game_running:
                     game_actions.on_game_stop(self)
         except Exception as ex:
             logger.exception("Unable to handle key press: %s", ex)
+        return False
 
     def get_toplevel(self):
-        raise NotImplementedError()
+        root = self.get_root()
+        if isinstance(root, Gtk.Window):
+            return root
+        return root
 
     def get_selected(self):
         return []
@@ -157,10 +244,6 @@ class GameView:
         """On game start, we trigger an animation to show the game is starting; it runs at least
         one cycle, but continues until the game exits the STATE_LAUNCHING state."""
 
-        # We animate by looking at how long the animation has been running;
-        # This keeps things on track even if drawing is low or the timeout we use
-        # is not quite regular.
-
         start_time = time.monotonic()
         cycle_time = 0.375
         max_indent = 0.1
@@ -168,12 +251,14 @@ class GameView:
         paused = False
 
         def is_modally_blocked():
-            # Is there a modal dialog that is blocking our top-level parent?
-            # if so we want to pause the animation.
-            for w in Gtk.Window.list_toplevels():
-                if w != toplevel and isinstance(w, Gtk.Dialog):
-                    if w.get_modal() and w.get_transient_for() == toplevel:
+            application = get_application()
+            if not application:
+                return False
+            for window in application.get_windows():
+                if window != toplevel and isinstance(window, Gtk.Window):
+                    if window.is_modal() and window.get_transient_for() == toplevel:
                         return True
+            return False
 
         def animate():
             nonlocal paused, start_time
@@ -182,8 +267,6 @@ class GameView:
             elapsed = now - start_time
 
             if elapsed > cycle_time:
-                # Check for stopping and pausing only at cycle end, so we don't do it too often,
-                # and to avoid a janky looking visible snap-back to full size.
                 if game.state != game.STATE_LAUNCHING:
                     if self.image_renderer.inset_game(game.id, 0.0):
                         self.queue_draw()
@@ -194,11 +277,9 @@ class GameView:
 
             cycle = elapsed % cycle_time
 
-            # After 1/2 the cycle, start counting down instead of up
             if cycle > cycle_time / 2:
                 cycle = cycle_time - cycle
 
-            # scale to achieve the max_indent at cycle_time/2.
             if paused:
                 fraction = 0.0
             else:
@@ -207,7 +288,7 @@ class GameView:
             if self.image_renderer.inset_game(game.id, fraction):
                 self.queue_draw()
 
-            return True  # Return True to call again after another timeout
+            return True
 
         if self.image_renderer:
             schedule_repeating_at_idle(animate, interval_seconds=0.025)

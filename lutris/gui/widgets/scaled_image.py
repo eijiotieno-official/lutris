@@ -68,7 +68,8 @@ class ScaledImage(Gtk.Image):
             if not has_stock_icon(fallback_stock_icon_name):
                 fallback_stock_icon_name = "package-x-generic-symbolic"
 
-            icon = Gtk.Image.new_from_icon_name(fallback_stock_icon_name, Gtk.IconSize.DND)
+            icon = Gtk.Image.new_from_icon_name(fallback_stock_icon_name)
+            icon.set_pixel_size(32)
         icon.set_visible(visible)
         return icon
 

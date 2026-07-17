@@ -67,44 +67,44 @@ class SearchFiltersBox(Gtk.Box):
         categories_scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         categories_frame = Gtk.Frame(visible=True)
         categories_frame.get_style_context().add_class("info-frame")
-        categories_frame.add(categories_scrolled_window)
+        categories_frame.set_child(categories_scrolled_window)
         self.categories_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        categories_scrolled_window.add(self.categories_box)
+        categories_scrolled_window.set_child(self.categories_box)
         categories_frame_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        categories_frame_box.pack_start(Gtk.Label(label=_("Categories"), halign=Gtk.Align.START), False, False, 0)
-        categories_frame_box.pack_start(categories_frame, True, True, 0)
+        categories_frame_box.append(Gtk.Label(label=_("Categories")), False, False, 0)
+        categories_frame_box.append(categories_frame)
 
         self._add_category_widgets()
 
         self.update_predicate_widgets()
 
-        predicates_box.pack_start(self.flags_grid, False, False, 0)
-        predicates_box.pack_start(categories_frame_box, True, True, 0)
-        self.pack_start(predicates_box, True, True, 0)
+        predicates_box.append(self.flags_grid)
+        predicates_box.append(categories_frame_box)
+        self.append(predicates_box)
 
-        self.show_all()
+        
 
     def _add_entry_box(
         self, label: str, text: str, button_icon_names: list[str] | None = None, clicked: Callable | None = None
     ) -> Gtk.Entry:
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         entry_label = Gtk.Label(label=label)
-        entry_label.set_alignment(0, 0.5)
+        entry_label.set_xalign(0)
         entry_label.set_size_request(120, -1)
         entry = Gtk.Entry()
         entry.set_text(text)
-        hbox.pack_start(entry_label, False, False, 0)
-        hbox.pack_start(entry, True, True, 0)
+        hbox.append(entry_label)
+        hbox.append(entry)
 
         if button_icon_names:
             button = Gtk.Button()
-            button.set_image(StockIconImage(button_icon_names, icon_size=Gtk.IconSize.BUTTON))
+            button.set_child(StockIconImage(button_icon_names, pixel_size=16))
             button.get_style_context().add_class("circular")
             if clicked:
                 button.connect("clicked", clicked)
-            hbox.pack_end(button, False, False, 0)
+            hbox.append(button)
 
-        self.pack_start(hbox, False, False, 0)
+        self.append(hbox)
         return entry
 
     def on_search_entry_changed(self, _widget):
@@ -163,7 +163,7 @@ class SearchFiltersBox(Gtk.Box):
                 combobox.set_active_id("")
 
         label = Gtk.Label(caption, halign=Gtk.Align.START, valign=Gtk.Align.CENTER)
-        label.set_alignment(0, 0.5)
+        label.set_xalign(0)
         label.set_size_request(120, -1)
         self.flags_grid.attach(label, 0, row, 1, 1)
 
@@ -254,7 +254,7 @@ class SearchFiltersBox(Gtk.Box):
             checkbox.set_active(matched)
 
         self.predicate_widget_functions[checkbox] = populate_widget
-        self.categories_box.pack_start(checkbox, False, False, 0)
+        self.categories_box.append(checkbox)
         checkbox.connect("toggled", on_checkbox_toggled)
 
     def _create_combobox(self, options):
@@ -270,7 +270,7 @@ class SearchFiltersBox(Gtk.Box):
         combobox.set_valign(Gtk.Align.CENTER)
         combobox.set_size_request(240, -1)
         renderer_text = Gtk.CellRendererText()
-        combobox.pack_start(renderer_text, True)
+        combobox.append(renderer_text)
         combobox.add_attribute(renderer_text, "text", 0)
         return combobox
 
@@ -323,11 +323,11 @@ class EditSavedSearchDialog(SavableModelessDialog):
         content_area = self.get_content_area()
         content_area.set_homogeneous(False)
         content_area.set_spacing(10)
-        content_area.pack_start(self.filter_box, True, True, 0)
+        content_area.append(self.filter_box)
 
-        delete_button = self.add_styled_button(Gtk.STOCK_DELETE, Gtk.ResponseType.NONE, css_class="destructive-action")
+        delete_button = self.add_styled_button(_("Delete"), Gtk.ResponseType.NONE, css_class="destructive-action")
         delete_button.connect("clicked", self.on_delete_clicked)
-        delete_button.show() if self.saved_search.saved_search_id else delete_button.hide()
+        delete_button.set_visible(True) if self.saved_search.saved_search_id else delete_button.set_visible(False)
 
     def on_save(self, button: Gtk.Button) -> None:
         """Save game info and destroy widget."""

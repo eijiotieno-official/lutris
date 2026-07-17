@@ -30,9 +30,10 @@ class LogWindow(GObject.Object):
 
         self.buffer = buffer
         self.logtextview = LogTextView(self.buffer)
+        self._font_size = self._get_current_font_size()
 
         scrolled_window: Gtk.ScrolledWindow = builder.get_object("scrolled_window")
-        scrolled_window.add(self.logtextview)
+        scrolled_window.set_child(self.logtextview)
 
         self.search_entry: Gtk.SearchEntry = builder.get_object("search_entry")
         self.search_entry.connect("search-changed", self.logtextview.find_first)
@@ -48,16 +49,37 @@ class LogWindow(GObject.Object):
         zoom_in_button.connect("clicked", self.on_zoom_in_clicked)
         zoom_out_button.connect("clicked", self.on_zoom_out_clicked)
 
-        self.window.connect("key-press-event", self.on_key_press_event)
-        self.window.show_all()
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.window.add_controller(key_controller)
+        self.window.present()
 
-    def on_key_press_event(self, widget: Gtk.ApplicationWindow, event: Gdk.EventKey) -> None:
-        shift = event.state & Gdk.ModifierType.SHIFT_MASK
-        if event.keyval == Gdk.KEY_Return:
+    def _get_current_font_size(self) -> float:
+        context = self.logtextview.get_pango_context()
+        font_desc = context.get_font_description()
+        return font_desc.get_size() / Pango.SCALE
+
+    def _apply_font_size(self) -> None:
+        tag_table = self.buffer.get_tag_table()
+        tag = tag_table.lookup("log-font")
+        if not tag:
+            tag = self.buffer.create_tag("log-font")
+        tag.set_property("font", Pango.FontDescription.from_string(f"monospace {int(self._font_size)}"))
+        self.buffer.apply_tag(
+            tag,
+            self.buffer.get_start_iter(),
+            self.buffer.get_end_iter(),
+        )
+
+    def on_key_pressed(self, _controller, keyval, keycode, state) -> bool:
+        shift = state & Gdk.ModifierType.SHIFT_MASK
+        if keyval == Gdk.KEY_Return:
             if shift:
                 self.search_entry.emit("previous-match")
             else:
                 self.search_entry.emit("next-match")
+            return True
+        return False
 
     def on_save_clicked(self, _button: Gtk.Button) -> None:
         """Handler to save log to a file"""
@@ -76,14 +98,12 @@ class LogWindow(GObject.Object):
 
     def on_zoom_in_clicked(self, _button: Gtk.Button) -> None:
         """Increase font size"""
-        font = self.logtextview.get_style_context().get_font(Gtk.StateFlags.NORMAL)
-        size = font.get_size() / Pango.SCALE
-        if size < 48:  # Maximum size
-            self.logtextview.override_font(Pango.FontDescription.from_string(f"monospace {size + 1}"))
+        if self._font_size < 48:
+            self._font_size += 1
+            self._apply_font_size()
 
     def on_zoom_out_clicked(self, _button: Gtk.Button) -> None:
         """Decrease font size"""
-        font = self.logtextview.get_style_context().get_font(Gtk.StateFlags.NORMAL)
-        size = font.get_size() / Pango.SCALE
-        if size > 6:  # Minimum size
-            self.logtextview.override_font(Pango.FontDescription.from_string(f"monospace {size - 1}"))
+        if self._font_size > 6:
+            self._font_size -= 1
+            self._apply_font_size()
