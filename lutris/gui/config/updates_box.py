@@ -32,26 +32,6 @@ class UpdatesBox(BaseConfigBox):
         self.update_media_box = UpdateButtonBox("", _("Download Missing Media"), clicked=self.on_download_media_clicked)
         self.append(self._get_framed_options_group([self.update_media_box]))
 
-    def _get_radio_button(
-        self, label_markup: str, active: bool, group: Gtk.RadioButton, margin: int = 12
-    ) -> Gtk.RadioButton:
-        radio_button = Gtk.RadioButton.new_from_widget(group)
-        radio_button.set_active(active)
-        radio_button.set_margin_left(margin)
-        radio_button.set_margin_right(margin)
-        radio_button.set_margin_top(margin)
-        radio_button.set_margin_bottom(margin)
-        radio_button.set_visible(True)
-
-        radio_button.set_label("")  # creates Gtk.Label child
-        label: Gtk.Label | None = radio_button.get_child()
-
-        if label:
-            label.set_markup(label_markup)
-            label.set_margin_left(6)
-            label.props.wrap = True
-        return radio_button
-
     def on_download_media_clicked(self, _widget):
         self.update_media_box.show_running_markup(_("<i>Checking for missing media...</i>"))
         AsyncCall(sync_media, self.on_media_updated)

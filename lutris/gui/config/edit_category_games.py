@@ -41,7 +41,7 @@ class EditCategoryGamesDialog(SavableModelessDialog):
         self.vbox.append(name_box)
         self.vbox.append(self._create_games_checkboxes())
 
-        delete_button = self.add_styled_button(Gtk.STOCK_DELETE, Gtk.ResponseType.NONE, css_class="destructive-action")
+        delete_button = self.add_styled_button(_("Delete"), Gtk.ResponseType.NONE, css_class="destructive-action")
         delete_button.connect("clicked", self.on_delete_clicked)
 
         

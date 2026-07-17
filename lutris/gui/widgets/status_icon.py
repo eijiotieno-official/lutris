@@ -3,7 +3,7 @@
 from gettext import gettext as _
 
 import gi
-from gi.repository import Gtk
+from gi.repository import Gio, Gtk
 
 from lutris.database import categories
 from lutris.database.games import get_games
@@ -34,15 +34,19 @@ class LutrisStatusIcon:
     def __init__(self, application):
         self.application = application
         self.indicator = None
-        self.menu = None
-        self.present_menu = None
+        self.menu_model = None
+        self.present_action = None
 
         if APP_INDICATOR_SUPPORTED:
-            self.menu = self._get_menu()
+            self.menu_model = self._build_menu_model()
             self.indicator = AppIndicator.Indicator.new(
                 "net.lutris.Lutris", "net.lutris.Lutris", AppIndicator.IndicatorCategory.APPLICATION_STATUS
             )
-            self.indicator.set_menu(self.menu)
+            if hasattr(self.indicator, "set_menu_model"):
+                self.indicator.set_menu_model(self.menu_model)
+            else:
+                popover_menu = Gtk.PopoverMenu.new_from_model(self.menu_model)
+                self.indicator.set_menu(popover_menu)
             self.set_visible(True)
 
     def is_visible(self):
@@ -60,40 +64,52 @@ class LutrisStatusIcon:
                 visible = AppIndicator.IndicatorStatus.PASSIVE
             self.indicator.set_status(visible)
 
-    def _get_menu(self):
-        """Instantiates the menu attached to the tray icon"""
-        menu = Gtk.Menu()
+    def _build_menu_model(self) -> Gio.Menu:
+        """Builds the menu model attached to the tray icon."""
+        menu = Gio.Menu()
         installed_games = self._get_installed_games()
-        number_of_games_in_menu = 10
-        for game in installed_games[:number_of_games_in_menu]:
-            menu.append(self._make_menu_item_for_game(game))
-        menu.append(Gtk.SeparatorMenuItem())
+        games_section = Gio.Menu()
+        for index, game in enumerate(installed_games[:10]):
+            games_section.append(f"game-{index}", game["name"])
+        if installed_games:
+            menu.append_section(None, games_section)
 
-        self.present_menu = Gtk.MenuItem()
-        present_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        present_box.append(Gtk.Image.new_from_icon_name("net.lutris.Lutris"))
-        present_box.append(Gtk.Label(label=_("Show Lutris")))
-        self.present_menu.set_child(present_box)
-        self.present_menu.connect("activate", self.on_activate)
-        menu.append(self.present_menu)
+        window_section = Gio.Menu()
+        window_section.append("present", _("Show Lutris"))
+        window_section.append("quit", _("Quit"))
+        menu.append_section(None, window_section)
 
-        quit_menu = Gtk.MenuItem(label=_("Quit"))
-        quit_menu.connect("activate", self.on_quit_application)
-        menu.append(quit_menu)
+        action_group = Gio.SimpleActionGroup()
+        for index, game in enumerate(installed_games[:10]):
+            action = Gio.SimpleAction.new(f"game-{index}", None)
+            action.connect("activate", self._on_game_action, game["id"])
+            action_group.add_action(action)
+
+        self.present_action = Gio.SimpleAction.new("present", None)
+        self.present_action.connect("activate", self.on_activate)
+        action_group.add_action(self.present_action)
+
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", self.on_quit_application)
+        action_group.add_action(quit_action)
+
+        self._action_group = action_group
         return menu
+
+    def _on_game_action(self, _action, _parameter, game_id):
+        launch_ui_delegate = self.application.get_launch_ui_delegate()
+        Game(game_id).launch(launch_ui_delegate)
 
     def update_present_menu(self):
         app_window = self.application.window
-        if app_window and self.present_menu:
+        if app_window and self.present_action and self.menu_model:
             label = _("Hide Lutris") if app_window.get_visible() else _("Show Lutris")
-            child = self.present_menu.get_child()
-            if isinstance(child, Gtk.Box):
-                for widget in child:
-                    if isinstance(widget, Gtk.Label):
-                        widget.set_label(label)
-                        break
+            # Rebuild menu to update the present label
+            if self.indicator and hasattr(self.indicator, "set_menu_model"):
+                self.menu_model = self._build_menu_model()
+                self.indicator.set_menu_model(self.menu_model)
 
-    def on_activate(self, _status_icon, _event=None):
+    def on_activate(self, *_args):
         """Callback to show or hide the window"""
         app_window = self.application.window
         if app_window.get_visible():
@@ -105,14 +121,9 @@ class LutrisStatusIcon:
         else:
             app_window.show()
 
-    def on_quit_application(self, _widget):
+    def on_quit_application(self, *_args):
         """Callback to quit the program"""
         self.application.quit()
-
-    def _make_menu_item_for_game(self, game):
-        menu_item = Gtk.MenuItem(label=game["name"])
-        menu_item.connect("activate", self.on_game_selected, game["id"])
-        return menu_item
 
     @staticmethod
     def _get_installed_games():
@@ -125,7 +136,3 @@ class LutrisStatusIcon:
             reverse=True,
         )
         return installed_games
-
-    def on_game_selected(self, _widget, game_id):
-        launch_ui_delegate = self.application.get_launch_ui_delegate()
-        Game(game_id).launch(launch_ui_delegate)

@@ -916,7 +916,6 @@ class InstallerWindow(ModelessDialog, DialogInstallUIDelegate, ScriptInterpreter
                 vbox.append(eject_button)
                 vbox.append(Gtk.Separator())
 
-            vbox.show_all()
             self.display_cancel_button()
 
         previous_page = self.stack.save_current_page()

@@ -49,7 +49,9 @@ class LogWindow(GObject.Object):
         zoom_in_button.connect("clicked", self.on_zoom_in_clicked)
         zoom_out_button.connect("clicked", self.on_zoom_out_clicked)
 
-        self.window.connect("key-press-event", self.on_key_press_event)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.window.add_controller(key_controller)
         self.window.present()
 
     def _get_current_font_size(self) -> float:
@@ -69,13 +71,15 @@ class LogWindow(GObject.Object):
             self.buffer.get_end_iter(),
         )
 
-    def on_key_press_event(self, widget: Gtk.ApplicationWindow, event: Gdk.EventKey) -> None:
-        shift = event.state & Gdk.ModifierType.SHIFT_MASK
-        if event.keyval == Gdk.KEY_Return:
+    def on_key_pressed(self, _controller, keyval, keycode, state) -> bool:
+        shift = state & Gdk.ModifierType.SHIFT_MASK
+        if keyval == Gdk.KEY_Return:
             if shift:
                 self.search_entry.emit("previous-match")
             else:
                 self.search_entry.emit("next-match")
+            return True
+        return False
 
     def on_save_clicked(self, _button: Gtk.Button) -> None:
         """Handler to save log to a file"""

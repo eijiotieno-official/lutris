@@ -37,8 +37,6 @@ class EditGameCategoriesDialog(SavableModelessDialog):
         if game:
             self.add_games([game])
 
-        self.vbox.show_all()
-
     def add_games(self, games: Sequence[Game]) -> None:
         """Adds games to the dialog; this is intended to be used when the dialog is for multiple games,
         and can be used more than once to accumulate games."""

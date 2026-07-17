@@ -90,7 +90,8 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
 
     __gtype_name__ = "LutrisWindow"
     games_stack: Gtk.Stack = Gtk.Template.Child()
-    split_view: Adw.OverlaySplitView = Gtk.Template.Child()
+    split_container: Gtk.Box = Gtk.Template.Child()
+    sidebar_wrapper: Gtk.Box = Gtk.Template.Child()
     sidebar_scrolled: Gtk.ScrolledWindow = Gtk.Template.Child()
     game_revealer: Gtk.Revealer = Gtk.Template.Child()
     search_entry: Gtk.SearchEntry = Gtk.Template.Child()
@@ -102,11 +103,13 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
     viewtype_icon: Gtk.Image = Gtk.Template.Child()
     download_revealer: Gtk.Revealer = Gtk.Template.Child()
     game_view_spinner: Gtk.Spinner = Gtk.Template.Child()
-    login_banner: Adw.Banner = Gtk.Template.Child()
     login_notification_box: Gtk.Box = Gtk.Template.Child()
-    version_banner: Adw.Banner = Gtk.Template.Child()
     version_notification_box: Gtk.Box = Gtk.Template.Child()
     show_hidden_games_button: Gtk.Button = Gtk.Template.Child()
+    header_bar: Gtk.HeaderBar = Gtk.Template.Child()
+    left_header_box: Gtk.Box = Gtk.Template.Child()
+    right_header_box: Gtk.Box = Gtk.Template.Child()
+    game_view_box: Gtk.Box = Gtk.Template.Child()
 
     def __init__(self, application=None, **kwargs) -> None:
         width = int(settings.read_setting("width") or self.default_width)
@@ -151,6 +154,7 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         if self.maximized:
             self.maximize()
         self._init_actions()
+        self._setup_adw_widgets()
         self._setup_controllers()
 
         # Per-game progress functions for launch-status (e.g. umu runtime
@@ -164,7 +168,7 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         filter_button_image = StockIconImage(
             ["filter-symbolic", "edit-find-replace-symbolic"],
             fallback_name="system-search-symbolic",
-            pixel_size=16,
+            icon_size=Gtk.IconSize.BUTTON,
         )
         self.search_filters_button.set_child(filter_button_image)
         self.filter_box_search_name = ""
@@ -184,8 +188,7 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
 
         self.login_notification_box.set_visible(False)
         self.version_notification_box.set_visible(False)
-        self.login_banner.set_revealed(False)
-        self.version_banner.set_revealed(False)
+        self.search_bar.set_key_capture_widget(self)
 
         self.game_bar = None
         self.revealer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, visible=True)
@@ -219,6 +222,56 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
 
         schedule_at_idle(self.sync_library, delay_seconds=1.0)
 
+    def _setup_adw_widgets(self) -> None:
+        """Construct libadwaita widgets that cannot be declared in Gtk.Template."""
+        self.split_view = Adw.OverlaySplitView(hexpand=True, vexpand=True)
+        self.split_view.set_sidebar(self.sidebar_wrapper)
+        self.split_view.set_content(self.game_view_box)
+        self._clear_box_children(self.split_container)
+        self.split_container.append(self.split_view)
+
+        adw_header = Adw.HeaderBar()
+        self.left_header_box.unparent()
+        self.right_header_box.unparent()
+        adw_header.pack_start(self.left_header_box)
+        adw_header.pack_end(self.right_header_box)
+        self.set_titlebar(adw_header)
+
+        self.login_banner = Adw.Banner(
+            title=_("Login to Lutris to sync your game library"),
+            button_label=_("Log in"),
+            revealed=False,
+        )
+        self.login_banner.connect("button-clicked", self.on_login_banner_button_clicked)
+        self.login_notification_close_button = Gtk.Button(
+            tooltip_text=_("Dismiss"),
+            valign=Gtk.Align.CENTER,
+        )
+        self.login_notification_close_button.add_css_class("flat")
+        self.login_notification_close_button.set_child(
+            Gtk.Image.new_from_icon_name("window-close-symbolic")
+        )
+        self.login_notification_close_button.connect(
+            "clicked", self.on_login_notification_close_button_clicked
+        )
+        self.login_notification_box.append(self.login_banner)
+        self.login_notification_box.append(self.login_notification_close_button)
+
+        self.version_banner = Adw.Banner(use_markup=True, revealed=False)
+        self.version_notification_close_button = Gtk.Button(
+            tooltip_text=_("Dismiss"),
+            valign=Gtk.Align.CENTER,
+        )
+        self.version_notification_close_button.add_css_class("flat")
+        self.version_notification_close_button.set_child(
+            Gtk.Image.new_from_icon_name("window-close-symbolic")
+        )
+        self.version_notification_close_button.connect(
+            "clicked", self.on_version_notification_close_button_clicked
+        )
+        self.version_notification_box.append(self.version_banner)
+        self.version_notification_box.append(self.version_notification_close_button)
+
     def on_busy_started(self):
         self.set_cursor(Gdk.Cursor.new_from_name("progress", None))
 
@@ -234,6 +287,10 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         drop_target.set_gtypes([Gdk.FileList.__gtype__, Gio.File.__gtype__])
         drop_target.connect("drop", self.on_drop)
         self.add_controller(drop_target)
+
+        search_key_controller = Gtk.EventControllerKey()
+        search_key_controller.connect("key-pressed", self.on_search_entry_key_press)
+        self.search_entry.add_controller(search_key_controller)
 
     @staticmethod
     def _clear_box_children(box: Gtk.Box) -> None:
@@ -1140,7 +1197,6 @@ class LutrisWindow(Adw.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         self.login_notification_box.set_visible(show_notification)
         self.login_banner.set_revealed(show_notification)
 
-    @Gtk.Template.Callback
     def on_login_banner_button_clicked(self, _banner):
         def on_connect_success(widget, _username):
             self.sync_library(force=True)

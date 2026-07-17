@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
   <requires lib="gtk" version="4.6"/>
-  <requires lib="Adw" version="1.2"/>
+  <requires lib="Adw" version="1.0"/>
   <object class="GtkImage" id="view_grid_symbolic">
     <property name="icon-name">view-grid-symbolic</property>
     <property name="pixel-size">16</property>
@@ -24,11 +24,11 @@
     <signal name="hide" handler="on_hide"/>
     <signal name="show" handler="on_show"/>
     <child>
-      <object class="AdwOverlaySplitView" id="split_view">
+      <object class="GtkBox" id="split_container">
         <property name="hexpand">True</property>
         <property name="vexpand">True</property>
-        <property name="sidebar">
-          <object class="GtkBox" id="sidebar_box">
+        <child>
+          <object class="GtkBox" id="sidebar_wrapper">
             <property name="orientation">vertical</property>
             <property name="width-request">220</property>
             <child>
@@ -48,8 +48,8 @@
               </object>
             </child>
           </object>
-        </property>
-        <property name="content">
+        </child>
+        <child>
           <object class="GtkBox" id="game_view_box">
             <property name="orientation">vertical</property>
             <property name="hexpand">True</property>
@@ -58,59 +58,12 @@
               <object class="GtkBox" id="login_notification_box">
                 <property name="orientation">horizontal</property>
                 <property name="spacing">6</property>
-                <child>
-                  <object class="AdwBanner" id="login_banner">
-                    <property name="hexpand">True</property>
-                    <property name="title" translatable="yes">Login to Lutris to sync your game library</property>
-                    <property name="button-label" translatable="yes">Log in</property>
-                    <signal name="button-clicked" handler="on_login_banner_button_clicked"/>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="login_notification_close_button">
-                    <property name="focusable">True</property>
-                    <property name="tooltip-text" translatable="yes">Dismiss</property>
-                    <property name="valign">center</property>
-                    <signal name="clicked" handler="on_login_notification_close_button_clicked"/>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">window-close-symbolic</property>
-                      </object>
-                    </child>
-                    <style>
-                      <class name="flat"/>
-                    </style>
-                  </object>
-                </child>
               </object>
             </child>
             <child>
               <object class="GtkBox" id="version_notification_box">
                 <property name="orientation">horizontal</property>
                 <property name="spacing">6</property>
-                <child>
-                  <object class="AdwBanner" id="version_banner">
-                    <property name="hexpand">True</property>
-                    <property name="use-markup">True</property>
-                    <property name="title" translatable="yes">Lutris %s is no longer supported. &lt;a href="https://lutris.net/downloads/"&gt;Download %s here!&lt;/a&gt;</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="version_notification_close_button">
-                    <property name="focusable">True</property>
-                    <property name="tooltip-text" translatable="yes">Dismiss</property>
-                    <property name="valign">center</property>
-                    <signal name="clicked" handler="on_version_notification_close_button_clicked"/>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">window-close-symbolic</property>
-                      </object>
-                    </child>
-                    <style>
-                      <class name="flat"/>
-                    </style>
-                  </object>
-                </child>
               </object>
             </child>
             <child>
@@ -143,7 +96,6 @@
 &lt;b&gt;playtime:&lt;/b&gt;&lt;i&gt;&amp;gt;2 hours&lt;/i&gt;	Only games played for more than 2 hours.
 &lt;b&gt;lastplayed:&lt;/b&gt;&lt;i&gt;&amp;lt;2 days&lt;/i&gt;	Only games played in the last 2 days.
 &lt;b&gt;directory:&lt;/b&gt;&lt;i&gt;game/dir&lt;/i&gt;	Only games at the path.</property>
-                        <signal name="key-pressed" handler="on_search_entry_key_press"/>
                         <signal name="search-changed" handler="on_search_entry_changed"/>
                       </object>
                     </child>
@@ -199,11 +151,11 @@
               </object>
             </child>
           </object>
-        </property>
+        </child>
       </object>
     </child>
     <property name="titlebar">
-      <object class="AdwHeaderBar" id="header_bar">
+      <object class="GtkHeaderBar" id="header_bar">
         <child type="start">
           <object class="GtkBox" id="left_header_box">
             <property name="spacing">6</property>

@@ -27,7 +27,12 @@ class SearchableEntrybox(Gtk.Box):
         self.completion.set_text_column(0)
         self.completion.set_match_func(self.search_store)
         self.entry.set_completion(self.completion)
-        self.popup_menu = Gtk.Menu()
+
+        self._popover = Gtk.Popover()
+        self._popover.set_parent(self.entry)
+        self._list_box = Gtk.ListBox()
+        self._list_box.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._popover.set_child(self._list_box)
 
         self.entry.connect("changed", self.on_entrybox_change)
         scroll_controller = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
@@ -59,15 +64,24 @@ class SearchableEntrybox(Gtk.Box):
         row_text = self.liststore[_iter][0].lower()
         return string.lower() in row_text
 
+    def _clear_popup_choices(self):
+        child = self._list_box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            self._list_box.remove(child)
+            child = next_child
+
     def _populate_entrybox_choices(self, choice_func):
-        """Populate the liststore and popup menu with choices."""
+        """Populate the liststore and popup list with choices."""
         try:
             choices = choice_func()
+            self._clear_popup_choices()
             for choice in choices:
                 self.liststore.append(choice)
-                menu_item = Gtk.MenuItem(label=choice[0])
-                menu_item.connect("activate", self.on_menu_item_activate, choice[1])
-                self.popup_menu.append(menu_item)
+                row_button = Gtk.Button(label=choice[0])
+                row_button.set_has_frame(False)
+                row_button.connect("clicked", self.on_list_item_clicked, choice[0], choice[1])
+                self._list_box.append(row_button)
 
             if self.initial:
                 self._set_initial_text()
@@ -81,16 +95,22 @@ class SearchableEntrybox(Gtk.Box):
     def repopulate(self):
         """Clear and repopulate choices; used when an async choices load completes."""
         self.liststore.clear()
-        self.popup_menu = Gtk.Menu()
         self._populate_entrybox_choices(self.choice_func)
 
     def on_entrybox_icon_press(self, _entry, _icon_pos, _event):
-        """Show popup menu when the primary icon is pressed."""
-        self.popup_menu.popup_at_widget(self.entry, Gdk.Gravity.SOUTH, Gdk.Gravity.NORTH, None)
+        """Show popup list when the primary icon is pressed."""
+        rect = Gdk.Rectangle()
+        rect.x = 0
+        rect.y = self.entry.get_height()
+        rect.width = self.entry.get_width()
+        rect.height = 1
+        self._popover.set_pointing_to(rect)
+        self._popover.popup()
 
-    def on_menu_item_activate(self, menu_item, active_id):
+    def on_list_item_clicked(self, _button, label, active_id):
         """Set the selected item text in the entry and emit the changed signal."""
-        self.entry.set_text(menu_item.get_label())
+        self.entry.set_text(label)
+        self._popover.popdown()
         self.emit("changed", active_id)
 
     def _set_initial_text(self):

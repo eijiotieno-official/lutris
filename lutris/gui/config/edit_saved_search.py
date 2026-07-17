@@ -325,7 +325,7 @@ class EditSavedSearchDialog(SavableModelessDialog):
         content_area.set_spacing(10)
         content_area.append(self.filter_box)
 
-        delete_button = self.add_styled_button(Gtk.STOCK_DELETE, Gtk.ResponseType.NONE, css_class="destructive-action")
+        delete_button = self.add_styled_button(_("Delete"), Gtk.ResponseType.NONE, css_class="destructive-action")
         delete_button.connect("clicked", self.on_delete_clicked)
         delete_button.set_visible(True) if self.saved_search.saved_search_id else delete_button.set_visible(False)
 
